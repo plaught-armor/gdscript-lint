@@ -1,0 +1,304 @@
+# GDScript — Data-Oriented Design
+
+Default paradigm. Code transforms data; doesn't *model* things. Reject three lies (Acton):
+
+1. **Code more important than data** — wrong. Data shape determines what's possible + how fast.
+2. **Code models the world** — wrong. Don't write `Rocket` for one rocket; model `(N rockets, dt) → new positions`.
+3. **Software is a platform** — wrong. Cache lines, Variant dispatch, bytecode are real. Big-O ignores dominating constants.
+
+Apply: separate **data** (POD) from **behavior** (pure transforms on collections). Encode state by **container membership**, not flags. Reference by **integer ID**, not pointer. Split data **by access pattern**, not domain object. Cheapest dispatch that fits.
+
+## D1 — POD data, zero behavior
+
+- `extends Resource` for saveable / editor-authored (settings, stat blocks, weapon defs, save slots).
+- `extends RefCounted` for transient in-memory (events, hit results, queries, scratch records).
+- Behavior moves OUT to `static func` on a systems class (`CombatSystem.classify_hit(...)`) or to the Node owning runtime state. `_init(...)` is the constructor when field set is fixed. **Don't** add `static make(...)` alongside `_init` — redundant indirection.
+- **Why:** trivially serializable, diffable, mod-overridable, unit-testable (no SceneTree). Mixed data+behavior drags SceneTree into tests + tangles save format with impl.
+
+## D2 — Existence-based processing (set membership over flags)
+
+Optional/conditional state = entity's presence in a container, not a field on every entity.
+
+| Bad | Good |
+|---|---|
+| `var _dead: bool` on every Enemy | `&"alive"` group |
+| `poisoned_for: float = 0.0` on every Enemy | `Dictionary[NodeId, float]` keyed by poisoned only |
+| `quest_giver_dialogue: String = ""` on every NPC | `&"quest_givers"` group + dialogue dict keyed by NodeId |
+| `if state == ALERT and alert_timer > 0:` | iterate `&"alert"` group; entries auto-removed on expire |
+
+Why: (1) single source of truth; (2) no flag-vs-state desync; (3) iteration naturally correct via `get_nodes_in_group(&"alive")` (cache for per-frame — see D2a below); (4) engine hooks align — `set_physics_process(false)` + `set_collision_layer(0)` at membership flip = stops ticking + stops being hit, no per-method guards.
+
+```gdscript
+# Bad — flag + guard everywhere, will desync.
+var _dead: bool = false
+func _physics_process(d): if _dead: return; ...
+func take_damage(amt, src): if _dead or amt <= 0: return; ...
+
+# Good — group is source of truth.
+func _ready(): add_to_group(&"alive")
+func take_damage(amt, src):
+    if not is_alive() or amt <= 0: return
+    ...
+func _die(src):
+    remove_from_group(&"alive")
+    set_physics_process(false); set_collision_layer(0)
+    died.emit(src)
+func is_alive() -> bool: return is_in_group(&"alive")
+```
+
+Stay bool when: binary user toggle (`_flashlight_on`), per-frame derived cache, one-shot init guard, singleton game-state (Player._dead). Multi-state machine → enum int (or one group per state). Prefer positive naming. Trap: remove-from-group ≠ SceneTree removal — visuals persist; `queue_free` still via death-visual timer.
+
+## D2a — Groups are HashMap-backed; don't hand-roll a set "for perf"
+
+Myth: groups = flat array scanned with `find`. False. `SceneTree` holds `HashMap<StringName, Group>`; each Node holds its own `HashSet<StringName>`. Cost ([forum](https://forum.godotengine.org/t/question-about-group-does-it-iterate-over-the-whole-tree/116906)):
+
+| Call | Backing | Cost |
+|---|---|---|
+| `add/remove_from_group` | HashMap insert/erase | O(1) |
+| `is_in_group(&"x")` | per-node HashSet | O(1) |
+| `get_first_node_in_group(&"x")` | HashMap lookup | O(1), no alloc |
+| `get_nodes_in_group(&"x")` | HashMap lookup + **fresh `Array` copy** | O(k) + per-call alloc |
+
+Only footgun: `get_nodes_in_group` in a hot loop ([proposal #7080](https://github.com/godotengine/godot-proposals/issues/7080)). For per-frame use, cache + refresh on entry/exit edges (signals: `tree.node_added_to_group`, `node_removed_from_group`), or batch behind a manager owning its own `Array[T]`. Everything else: groups are simplest correct shape, don't replace with Dict-of-IDs "for perf."
+
+Better than `is_in_group` when applicable: `is_in_group(&"player")` → `is Player`. Same O(1), compile-time-checked, no `StringName` hash, no typo, no tag-the-node requirement. Per-member metadata → `Dictionary[int, RecordType]` keyed by `get_instance_id()`. Groups answer "is it in the set"; dicts answer "what data does it have."
+
+Trap: hand-rolled `static var alive: Array[Enemy]` skips the engine's hashset, re-implements with worse ergonomics (every spawner pushes, every `_exit_tree` pulls, forgetting one is silent). Default to groups; only roll your own for typed storage or save-side serialization.
+
+## D3 — Reference by integer ID, not object pointer
+
+When a ref crosses systems / gets serialized / sits in a signal payload / outlives the holder's subtree → store `get_instance_id()` (or your own assigned ID); resolve via `instance_from_id()` + `is`/validity check at use site.
+
+Why: (1) sidesteps freed-ID-reuse bug ([#32383](https://github.com/godotengine/godot/issues/32383)) — ID lookup returns live object or `null`, never wrong-type live; (2) breaks RefCounted cycles ([#7038](https://github.com/godotengine/godot/issues/7038)); (3) save-friendly; (4) `Dictionary[int, T]` keyed by ID is natural existence-based shape; (5) external indexing without invasive bookkeeping.
+
+```gdscript
+# Bad — live ref; freed-source bug, cycle, won't serialize.
+var _attacker: Node = null
+func take_damage(amt: int, src: Node): _attacker = src
+
+# Good — store ID, resolve on use.
+var _attacker_id: int = 0
+func take_damage(amt: int, src: Node):
+    _attacker_id = src.get_instance_id() if src != null else 0
+func _retaliate():
+    var s: Object = instance_from_id(_attacker_id)
+    if s is Enemy and s.is_alive(): ...
+```
+
+Sibling refs inside one scene tree → typed push-injection (see [style.md](style.md) M11). Child→parent → object refs fine (co-extensive lifecycle).
+
+## D4 — Split data by access pattern, not domain object
+
+Monolithic Enemy with 30 fields touched by 5 systems is wrong. Decompose into per-concern containers:
+
+- positions (`PackedVector3Array` on manager), AI state (typed `RefCounted` records keyed by ID), inventory (Dict keyed by item), perception (`&"alerted"` group).
+- Save: `SaveSlot` = relational object — `position_data`, `inventory_data`, `quest_state`, `room_state` separate, not one blob.
+- Don't denormalize ("cache enemy's room on enemy"). Room owns occupants; enemy looks up when needed.
+- Don't mirror world-noun hierarchy onto class hierarchy. No `Rocket` class — `Rocket` is one row. There may be `RocketDef` (Resource, shared) + `RocketPool` (Node, owns Array of active).
+
+## D5 — Hot/cold data split
+
+Per-frame fields shouldn't co-locate with load-time / once-per-event fields.
+
+- Hot: position, velocity, current health, anim state, current AI state.
+- Cold: max-health, damage table, dialogue strings, model path, sound IDs.
+- Move cold to shared `Resource` (`EnemyDef`), one per *kind*, referenced by N runtime enemies.
+- GDScript-specific: Variant boxing dominates cache effects, but every hot-loop field access still walks property table. Smaller hot objects = less per-tick overhead. Shared `EnemyDef` = N enemies of one kind share one set of design-time fields → cheaper memory + mod-overridable in one place.
+
+## D6 — Transforms over methods
+
+Behavior = `(input data) → (output data)`. Not `data.apply_to(target)`.
+
+```gdscript
+# Bad — behavior in data class, mutates self, hard to test.
+class_name HitResult extends RefCounted
+var damage: int
+var crit: bool
+func apply(target: Enemy):
+    target.health -= damage
+    if crit: target.stagger()
+
+# Good — pure transform on system; data dumb, testable in isolation.
+class_name HitResult extends RefCounted
+var damage: int
+var crit: bool
+
+class_name CombatSystem extends RefCounted
+static func resolve(hit: HitResult, target: Enemy):
+    target.health -= hit.damage
+    if hit.crit: target.stagger()
+```
+
+Manager-level transforms take collections, not single items: `EnemyManager.tick_all(delta)` over `for e in enemies: e._physics_process(delta)`. Homogeneous batch → one allocator scope, branch predictor warm, cache-friendly.
+
+## D7 — Condition tables over branch chains
+
+Finite known dispatch keys → `Dictionary` lookup keyed by discriminator. New cases = new rows, not new code.
+
+```gdscript
+# Bad — every (weapon, armor) edits this fn.
+func damage_multiplier(w: int, a: int) -> float:
+    if w == W.PISTOL and a == A.NONE: return 1.0
+    if w == W.PISTOL and a == A.LIGHT: return 0.8
+    if w == W.SHOTGUN and a == A.NONE: return 1.5
+    ...
+
+# Good — table is data.
+const DAMAGE_MULT: Dictionary = {
+    W.PISTOL:  {A.NONE: 1.0, A.LIGHT: 0.8, A.HEAVY: 0.5},
+    W.SHOTGUN: {A.NONE: 1.5, A.LIGHT: 1.1, A.HEAVY: 0.7},
+}
+func damage_multiplier(w: int, a: int) -> float: return DAMAGE_MULT[w][a]
+```
+
+Designer-tunable → move table to `.tres` Resource (Dict export). Direct `d[k]` not `d.get(k, default)` on known schemas (S7). Doesn't apply when keys open-ended or behavior conditional on multiple non-discriminator inputs.
+
+### D7a — Convention-derived dispatch via explicit helper
+
+Closed enum → file path / string key mapping. Pick an explicit `if/elif` helper over `Id.keys()[i].to_lower()`. Wins: no StringName alloc + lowercasing per call, one-place override for slots whose asset name diverges from the enum spelling, loud default (final `else` catches new slots — pair with boot validate so the missing arm surfaces there, not at first use).
+
+```gdscript
+# Bad — alloc per call; can't override a slot whose .tscn diverges
+# from the enum name without renaming the enum.
+func _scene_path(id: Id) -> String:
+    return "res://scenes/items/%s.tscn" % Id.keys()[id].to_lower()
+
+# Good — allocation-free, per-slot override at hand. if/elif not match (D7b).
+static func _scene_basename(id: Id) -> String:
+    if id == Id.POTION: return "potion"
+    elif id == Id.SWORD_GRIP: return "sword_grip"
+    ...
+    else: return ""   # inventory-only / unmapped
+```
+
+String-literal returns are interned, so the dispatch is cheap. Boot validate fires on missing arms via the empty-return path; designer feedback at boot, not first use. Use `if/elif` for the body (D7b) — value-only dispatch on `id`, not pattern matching.
+
+## D7b — Value-only dispatch → `if/elif`, not `match`
+
+`match` is the wrong construct for value dispatch. Reserve it for **actual pattern matching** (binding, destructuring, type patterns, guards). "Value-only" = branching on the value of one discriminator (type code, tag byte, enum, string key) where each arm is a plain compare. That's most `match` usage in the wild — and it's slower with zero offsetting benefit. **Applies even on cold paths** — the construct choice is unconditional; ROI just larger in hot loops.
+
+**Bytecode:** a `match` arm compiles to ~10 VM opcodes (typeof check + value compare + bool materialize + branch) — it carries pattern-matching machinery (destructure, bind, type-test) even when you use none of it. An `if/elif` branch is ~2. Interpreted GDScript pays per opcode → value `match` ≈ 5× the dispatch overhead of the equivalent `if` chain.
+
+**Measured** (`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, all surrounding work held identical, vs `Array[Callable]` index baseline = 1.00×):
+
+| construct | vs Callable jump-table |
+|---|---|
+| `Array[Callable]` index ("jump table") | 1.00× |
+| `match` + direct call | 0.83× — slower than the Callable it would replace |
+| `if-elif` + direct call | 1.00× |
+| `if-elif` + inline read | 1.44× |
+| `match`, 6 arms, hit last | 0.62× — linearity brutal |
+| `if-elif`, 6 arms, hit last | 1.30× — linearity cheap |
+
+Two takeaways: (1) no real jump table exists in interpreted GDScript — even `Array[Callable]` indexing isn't O(1)-cheap, and `match` is worse than it; (2) `if/elif` lets you inline the arm body (no `Callable.call`, no call frame) — where the real 1.44× win lives.
+
+**Nuance — hoist a computed subject.** `match x` evaluates `x` once; a naive `if x == A: elif x == B:` re-evaluates per branch. When the subject is computed (`typeof(v)`, `reader.get_method()`, `outcome.value`), assign to a typed local first, then branch on the local:
+
+```gdscript
+var t: int = typeof(v)   # evaluate once, like match did
+if t == TYPE_INT: ...
+elif t == TYPE_STRING: ...
+```
+
+Plain param/local subjects need no hoist — compare directly. Don't alias a param to a local "to be safe"; that's a wasted assignment.
+
+**When `match` IS still correct:** real pattern matching with no clean `if` equivalent — binding (`var n`), destructuring (`[a, b]`, `{"key": v}`), type patterns, guards (`when`), wildcard-with-binding. There the expressiveness is the point and the perf cost buys something.
+
+**Exhaustiveness objection — moot.** GDScript `match` does *not* enforce exhaustiveness (no compile error on a missing arm), so converting a value `match` to `if/elif` loses nothing safety-wise. Keep a final `else`/default that fails loud (or a boot-time validator), exactly as you'd keep `match`'s `_:` arm.
+
+## D8 — Batched homogeneous processing > per-Node tick
+
+N entities of one kind running `_physics_process` pays per-Node overhead × N. One manager iterating once per tick is faster *and* composes with existence-based filtering (skip dead, skip distant) before the inner loop.
+
+- `EnemyManager` autoload or scene-root owns `Array[Enemy]`, drives via `for e in alive: e.tick(delta)`. Per-instance `set_physics_process(false)` in `_ready`.
+- Pairs with D2: manager iterates alive set once/frame; dead aren't in loop. **Don't call `get_nodes_in_group(&"alive")` inside the per-frame loop** — alloc per call. Cache in manager-side `Array[T]`, refresh via signals.
+- ROI only at N × per-frame cost large enough. Don't refactor 5 enemies.
+
+## D9 — Static-on-RefCounted vs autoload Node
+
+Measured Godot 4.7-beta (1M iters × 3):
+
+| Dispatch | × inline |
+|---|---|
+| inline | 1.00 |
+| `static func` on `class_name`d RefCounted | ~2.27 |
+| autoload global ident (`SoundBus.emit(...)`) | ~2.43 |
+| instance method on cached ref | ~2.67 |
+| `get_node(^"AutoloadName").method()` per call | ~4.06 |
+| signal_emit, 1 listener | ~4.5 |
+| signal_emit, 4 listeners | ~5.8–11.6 |
+
+- Pure-fn helper → `class_name FooSystem extends RefCounted` + `static func` only. Never instantiate.
+- Cache/registry/RNG seed/pub-sub signal → autoload Node (must be Node to own signals).
+- ⊥ resolve autoload via `get_node(^"X")` in hot paths — use global ident (cached at load).
+- Promotion: static-only → drop `static`, add to `[autoload]`. Callsites unchanged (`class_name` already global).
+
+## P18 — Signals decouple, don't speed
+
+~2× slower than static fn; scales linearly with listener count. Producer doesn't import consumers (`SoundBus.sound_emitted` → N enemy Ears subscribe).
+
+- Hot path + small known consumer → direct call. ⊥ emit signal in `_physics_process` to one known listener (2-5× perf bug).
+- Decoupled 1-N w/ variable count → signal.
+- Rule: emit-freq × listener-count > 100/sec on hot path → profile first.
+
+## Inline perf checklist (ROI-ordered)
+
+Most dispatch cost invisible vs frame budget. Matters only in measured hot loops (1M+ ops/frame). Measure first.
+
+| # | Move | Speedup | When |
+|---|---|---|---|
+| 1 | Static typing on every var/param/return | ~40-50% | always (mandatory) |
+| 2 | Typed math fns (`clampf`/`absf`/`lerpf`) | ~20-30% per call | always |
+| 3 | `@onready` / cached node refs (no `get_node` per call) | ~1.7× | always |
+| 4 | Hoist invariants out of hot loop | linear w/ iter count | measured hot loops |
+| 5 | Avoid alloc (Dict literals, `[]`/`{}`, `.new()`) in hot path | 2-10× | profiler-pointed |
+| 6 | Typed RefCounted records over Dictionaries | ~2-3× field access vs key hash | cross-fn results |
+| 7 | `Packed*Array` over `Array[float]`/`Array[int]` | 3-5× iter | bulk numeric |
+| 8 | Hand-inline the hot body | ~2.27× | profiler-confirmed |
+| 9 | GDExtension (C++) | 10-100× | last resort |
+| 10 | Lower tick / batch ticks (one EnemyManager loop vs per-Node) | linear w/ freq cut | N × per-frame cost = bottleneck |
+
+Trap: preemptive inlining loses reuse, hides intent, almost never moves needle. Sanity: `(call cost ns) × (calls/sec)` vs `16_600_000 ns` (60fps). < 10_000 ns → dispatch irrelevant, find another bottleneck.
+
+## D10 — Enums over StringNames for finite closed label sets
+
+Fixed closed set (states, kinds, slots, categories) → `enum` int. Reserve `StringName` for string-like ops (concat, prefix match) or engine APIs that demand it (`add_to_group`, `Input.is_action_*`). Enums: compile-time exhaustive in `match`, no Variant dispatch, can't typo.
+
+### D10a — Type as enum at API boundaries; int at wire format
+
+GDScript's enum is `int` under the hood; passing an int to an enum-typed param emits a warning but works. Discipline matters at the **API boundary**, where designer-intent surfaces in autocomplete + code-review scrutiny:
+
+- **Enum-typed**: registry public API (`get_def(id: Id)`), Resource fields holding a slot (`@export var id: ItemRegistry.Id`), method params receiving an enum literal from a known producer (`InventorySystem.consume_by_id(inv, item_id: Id, count: int)`).
+- **`int`-typed**: `PackedInt32Array` (Packed* can't carry an enum type), save-slot fields written to disk, return values that are *counts or indices* (`find_first → int`, `total_count → int`).
+
+Wire format stays int because `PackedInt32Array` is the only fixed-width int container — saves implicitly cast back at read. The boundary line is "is this value enum-scoped at this surface, or is it a raw index/count?"
+
+## D11 — Mirror registries are coupling, not split
+
+D4 says "split data by access pattern, not domain object." It does NOT say "carry two parallel arrays keyed by the same discriminator." Two registries sharing one `enum Id` as their index → coupling, not split.
+
+```gdscript
+# Bad — parallel arrays must stay length-aligned. Every new item edits
+# both arrays + a parity test guards the drift.
+class_name ItemRegistry
+static var ALL: Array[ItemDef] = [null, preload(...), ...]   # the data
+
+class_name DropRegistry           # second autoload, parallel array
+static var SCENES: Array[PackedScene] = [null, preload(...), ...]
+
+# Parity-asserting test = the smell:
+assert_eq(DropRegistry.SCENES.size(), ItemRegistry.Id.size())
+```
+
+Fix one of two ways:
+
+1. **Fold the second registry into the first** as a derived/cached field (or method backed by ResourceLoader's own cache — see [`resource-loading.md`](resource-loading.md) "Don't roll your own cache").
+2. **Derive at runtime via convention** (D7a). `Id.SWORD_GRIP` → `res://scenes/items/sword_grip.tscn`. Boot validate confirms the file exists; runtime lookup is a single `load()`. The parity test goes away with the mirror.
+
+Real D4 splits keep different shapes per access pattern — positions in `PackedVector3Array` on a manager, AI state in `Dictionary[int, RefCounted]` keyed by id, perception via `&"alerted"` group. None of them duplicate the index space.
+
+Smell test: a parity-asserting test that checks `len(A) == len(B)` is the giveaway.
+
+---
+
+Mechanical style/perf flags (condensed): S2 code ordering, S4 unused `_`-prefix, S5 enum iota, S6 packed `[]`, S12 print-format source, S14 `const StringName` in `find_child`, P2 value-only `match` → `if/elif` (~5× dispatch overhead, even cold paths — see D7b) ([#75682](https://github.com/godotengine/godot/issues/75682)), P3 cache autoload in hot loop, P4 fn-call overhead vs inline ([#94752](https://github.com/godotengine/godot/issues/94752)), P6 `pop_front` O(n) ([#45455](https://github.com/godotengine/godot/issues/45455)), P7 `.resize(n)` pre-alloc, P8 Dict for membership > 5 items, P20 reuse physics query objects, P21 pool > 10×/sec spawns.
