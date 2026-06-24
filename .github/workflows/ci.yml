@@ -1,0 +1,19 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rule-assertions:
+    # The rule-coverage suite: asserts gd-lint catches every rule exactly where
+    # the fixtures mark it. Runs without Godot (SKIP_GODOT) — Python only, so it
+    # needs no engine download. Fixture parse-validation against a real Godot
+    # binary is a local step (set GODOT_BIN; see tests/README.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python version
+        run: python3 --version
+      - name: gd-lint rule assertions
+        run: SKIP_GODOT=1 bash tests/run.sh
