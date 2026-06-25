@@ -101,6 +101,82 @@ not a ninth slot. The bank is fixed; the indices cycle.
 | D8 | N self-ticking bullets | one `while` over `_active` | inline, only live slots |
 | P6 | — | swap-back from `_active` | O(1) return-to-pool, no shift |
 
+## Variants & use-cases
+
+The example is one point in a wide space. Pick by the use-case, and **profile
+before pooling at all**.
+
+### Do you even need it?
+
+GDScript objects are **reference-counted, not garbage-collected** — there are no
+GC pauses for pooling to amortize, and Godot 4 made node instantiation much
+faster than Godot 3, retiring many old "you must pool" recipes. The engine lead's
+default advice is *"you don't really need to do pooling"*
+([reduz](https://x.com/reduzio/status/1073284242086551552),
+[GDQuest](https://www.gdquest.com/tutorial/godot/design-patterns/intro-to-design-patterns/)).
+Pool only when a profiler points at instantiation — high-frequency, short-lived
+objects (bullet hells, swarms, repeated VFX). And often the bigger win is to skip
+Nodes entirely: `MultiMeshInstance` + a `PackedVector2Array` of transforms, or a
+server-side bullet system, beats a Node pool at scale
+([qurobullet](https://github.com/quinnvoker/qurobullet)).
+
+### Exhaustion policy (Nystrom's four)
+
+This example returns `-1` (silent drop). That's one of four
+([Game Programming Patterns — Object Pool](https://gameprogrammingpatterns.com/object-pool.html)):
+
+| Policy | Fits | Example here |
+|---|---|---|
+| **Prevent** (size for peak) | known bounded load | size `CAP` from peak concurrent × lifetime × rate |
+| **Drop** the new request | particles/VFX — one missed puff is invisible | our `return -1` |
+| **Replace oldest/quietest** | audio voices, bullet-hell ("a snapped bullet beats a stutter") | evict `_active[0]` instead of refusing |
+| **Grow** (instantiate + `push_warning`) | catch undersizing in playtest | append a slot on miss |
+
+### Stale-handle safety: generational indices
+
+A raw slot index has the **ABA problem**: hold index 5 (Alice), Alice expires,
+Bob reuses slot 5 — your index now silently points at Bob. (Same class as Godot's
+own `instance_from_id` reuse, [#32383](https://github.com/godotengine/godot/issues/32383),
+this corpus's D3/C8.) For handles that **outlive** their referent (an AI target, a
+saved reference), pack a **generation** alongside the index: a 64-bit handle =
+`index | (generation << 32)`, a `PackedInt64Array` of per-slot generations bumped
+on free, and an `is_valid(handle)` check at every read
+([generational indices](https://www.studyplan.dev/structure-of-arrays/generational-indices)).
+For one-frame transient refs (our example), skip it — the overhead exceeds the
+bug surface.
+
+### Pooling Nodes (not pure data)
+
+If you must pool `Node`s, the reset discipline is the hard part — **`_ready()`
+does NOT re-fire** on reuse, so a `reset()` / `on_spawn()` is mandatory, and it
+must clear *every* mutable field (position, velocity, `modulate`, `scale`, timers,
+AI state, **signal connections**), or stale state leaks into the next user
+([forum](https://forum.godotengine.org/t/what-is-the-best-way-to-do-object-pooling/28960),
+[reset gotchas](https://uhiyama-lab.com/en/notes/godot/godot-object-pooling-basics/)).
+"Inert while pooled" needs three toggles, not one: `set_process(false)` +
+`set_physics_process(false)` + `collision_layer = collision_mask = 0` (and
+`freeze = true` for a `RigidBody`, which ignores `set_physics_process`). Keep
+pooled nodes parented to one `PoolRoot` and toggle them — don't churn the tree
+with `remove_child`/`add_child`. Pre-warm the whole bank at level load so the
+spike lands on the loading screen. **The pure-data SoA pool above sidesteps all of
+this** — no `_ready`, no signals, no per-node toggles; it's the cheapest pool when
+the entity doesn't need to be a Node.
+
+### Per use-case
+
+| Use-case | Variant | Note |
+|---|---|---|
+| Bullets | data/`BulletServer` or MultiMesh; replace-oldest | hand-pooled Nodes only at low counts |
+| Particles | **don't hand-pool** — `GPUParticles` `one_shot` + `restart()` | pool the *emitter* if you need many sites/sec |
+| Enemies | manager-local Node pool, `set_physics_process(false)` while idle | only if cheap + high spawn rate (D8) |
+| Audio | `AudioStreamPlayer.max_polyphony` (4.0+) obviates most | else replace-oldest/quietest voice |
+| UI list (virtualized) | visible-window pool, recycle off-screen rows | size = visible count; can't exhaust |
+| Tween/Timer | pool-of-one (`stop()`/`start()` reuse) | per-frame `create_tween()`/`Timer.new()` churns |
+
+Manager-local pools (scoped to a level, die with the manager) are the clean
+default; a global autoload pool only when consumers are spread across scenes
+(UI, audio) — at the cost of harder cross-level cleanup.
+
 ## Run it
 
 ```bash
