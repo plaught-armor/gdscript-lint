@@ -267,6 +267,14 @@ Trap: preemptive inlining loses reuse, hides intent, almost never moves needle. 
 
 Fixed closed set (states, kinds, slots, categories) → `enum` int. Reserve `StringName` for string-like ops (concat, prefix match) or engine APIs that demand it (`add_to_group`, `Input.is_action_*`). Enums: compile-time exhaustive in `match`, no Variant dispatch, can't typo.
 
+**Container follows the key type — preference order:**
+
+1. **`enum` + dense `Array` indexed by the enum int** (`ALL[Id.POTION]`). O(1) slot, no hash, no Variant boxing, contiguous. Default for any closed set. The enum *is* the index — no separate key structure (D4 positions array, D7 condition table, D11 registry are all this shape).
+2. **`StringName`-keyed `Dictionary`** — only when the key set is genuinely open / unbounded / external (mod-supplied ids, runtime-discovered names, engine group names). `StringName` interns + compares by pointer, so it beats `String` keys, but it is still a hash lookup with Variant values.
+3. **`String`-keyed `Dictionary`** — last resort. Only for keys that are literally text from outside (parsed JSON, file paths, user input) and never re-derived as an identifier.
+
+So: **enum + Array index > `StringName`-keyed Dict > `String`-keyed Dict.** Picking a `StringName` key is admitting the set is not closed — if it *is* closed, enum+Array collapses the lookup to a bare array index and the key disappears. Don't reach for a `StringName`-keyed dict on a finite known set "because it reads nicely" — that is the Variant-dispatch tax (D2a, P9) for no gain.
+
 ### D10a — Type as enum at API boundaries; int at wire format
 
 GDScript's enum is `int` under the hood; passing an int to an enum-typed param emits a warning but works. Discipline matters at the **API boundary**, where designer-intent surfaces in autocomplete + code-review scrutiny:

@@ -32,6 +32,9 @@ Rules (cite the corpus):
   M1   await in _ready()      — pauses init; call_deferred / separate coroutine
   P6   .pop_front()/.pop_at(0) — O(n) front-shift on Array (#45455) (advisory)
   H14  (x as T) after 'is T'  — redundant cast, 'is' already narrowed (advisory)
+  H4   signal foo(a, b)        — untyped signal params (#110573); type them
+  H13  has_method+call pair    — duck-typed dispatch → base class + 'is' (advisory)
+  S11  print() in _process     — per-frame sync I/O; gate/remove (advisory)
 
 Each finding is labelled with a CATEGORY: CORRECT (bug / wrong result), PERF
 (speed), or STYLE (idiom). Output line: 'path:line: RULE [CATEGORY]: msg'.
@@ -135,8 +138,18 @@ _P12A_METHODS = (
     "add_theme_color_override", "add_theme_font_override",
     "add_theme_font_size_override", "add_theme_constant_override",
     "add_theme_stylebox_override", "add_theme_icon_override",
+    # meta API: name arg is unambiguously StringName, no non-StringName overload.
+    "get_meta", "set_meta", "has_meta", "remove_meta",
 )
 _RE_P12A = re.compile(r"\b(?:" + "|".join(_P12A_METHODS) + r")\s*\(")
+# P12a (decl site): a var/param/@export typed StringName or NodePath initialised
+# with a BARE string literal — the annotation proves intent, so the literal
+# should carry the matching sigil (&"x" for StringName, ^"a/b" for NodePath).
+# Detected on masked (':  StringName ='), confirmed by peeking raw's first
+# value char: '&'/'^' = already correct, '"'/"'" = bare → flag. A non-literal
+# RHS (identifier, call) lands on a non-quote char and is left alone.
+_RE_SN_DECL = re.compile(r":\s*StringName\s*=")
+_RE_NP_DECL = re.compile(r":\s*NodePath\s*=")
 
 # S6: only the element types that HAVE a Packed* variant. Vector2i/Vector3i/
 # Vector4/StringName/bool deliberately excluded (no packed equivalent) — the
@@ -259,15 +272,47 @@ def rule_s15(raw: str, m: str) -> str | None:
     return None
 
 
+def _bare_quote_after(raw: str, k: int) -> bool:
+    # True if the first non-blank char at/after k in raw is a bare quote (not
+    # preceded by a '&'/'^' sigil, which would land on the sigil instead).
+    while k < len(raw) and raw[k] in " \t":
+        k += 1
+    return k < len(raw) and raw[k] in ("\"", "'")
+
+
 def rule_p12a(raw: str, m: str) -> str | None:
     # find the call in masked (proves it's code), peek raw's first arg for a
     # bare quote — '&'/'^' prefix would land on '&'/'^', not the quote.
     for mo in _RE_P12A.finditer(m):
-        k = mo.end()
-        while k < len(raw) and raw[k] in " \t":
-            k += 1
-        if k < len(raw) and raw[k] in ("\"", "'"):
+        if _bare_quote_after(raw, mo.end()):
             return "P12a: pass '&\"x\"' (StringName) not a bare string to this method"
+    # decl site: typed StringName/NodePath = bare string → wants &"x" / ^"a/b".
+    for mo in _RE_SN_DECL.finditer(m):
+        if _bare_quote_after(raw, mo.end()):
+            return "P12a: StringName init with a bare string — use '&\"x\"' (the annotation proves intent)"
+    for mo in _RE_NP_DECL.finditer(m):
+        if _bare_quote_after(raw, mo.end()):
+            return "P12a: NodePath init with a bare string — use '^\"a/b\"' (the annotation proves intent)"
+    return None
+
+
+# H4 (CORRECT, #110573): a signal declared with untyped params can't be
+# connect()-checked against the handler — typed params surface arity/type
+# mismatch at connect time. Single-line decl; flag if any non-empty param lacks
+# a ':'. 'signal foo' / 'signal foo()' (no params) are fine.
+_RE_SIGNAL_DECL = re.compile(r"^\s*signal\s+\w+\s*\(([^)]*)\)")
+
+
+def rule_h4(raw: str, m: str) -> str | None:
+    mo = _RE_SIGNAL_DECL.match(m)
+    if mo is None:
+        return None
+    params = mo.group(1).strip()
+    if params == "":
+        return None
+    for part in params.split(","):
+        if part.strip() != "" and ":" not in part:
+            return "H4: type the signal params — 'signal foo(a: T, b: U)' (untyped params can't be connect-checked, #110573)"
     return None
 
 
@@ -347,6 +392,7 @@ def rule_p6(raw: str, m: str) -> str | None:
 LINE_RULES: dict[str, object] = {
     "H1": rule_h1,
     "H2": rule_h2,
+    "H4": rule_h4,
     "S1": rule_s1,
     "C1": rule_c1,
     "C3": rule_c3,
@@ -367,14 +413,15 @@ LINE_RULES: dict[str, object] = {
 # confirmed L1 (~1.3x) and P22 (~1.3x) but L1 carries FP and P22 can't tell
 # float from int — both advise, never block. L2/L3 are style only (perf
 # refuted). Promote out of this set only on a measured >=1.3x win + ~0 FP.
-ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14"}
+ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14", "H13", "S11"}
 
 # Category per rule: CORRECT (bug / wrong result), PERF (speed), STYLE (idiom).
 CATEGORY: dict[str, str] = {
     "C1": "CORRECT", "C3": "CORRECT", "C9": "CORRECT", "C14": "CORRECT",
-    "C11": "CORRECT", "M1": "CORRECT",
+    "C11": "CORRECT", "M1": "CORRECT", "H4": "CORRECT", "H13": "CORRECT",
     "H1": "PERF", "H2": "PERF", "S6": "PERF", "D7b": "PERF", "P12a": "PERF",
     "L1": "PERF", "L2": "PERF", "P22": "PERF", "P6": "PERF", "H14": "PERF",
+    "S11": "PERF",
     "S1": "STYLE", "S6b": "STYLE", "S15": "STYLE", "L3": "STYLE",
 }
 
@@ -560,6 +607,48 @@ def find_await_in_ready(masked: list[str]) -> list[tuple[int, str]]:
     return out
 
 
+# S11 (advisory PERF): `print()` is synchronous I/O — cheap once (~0.68 µs/call,
+# BENCH.md), but in a per-frame callback it fires 60×/s and the cost is real.
+# The broad "no ungated print" form is unenforceable (a `print` gated behind a
+# debug flag is indistinguishable from an ungated one on one line → FP on every
+# legit debug print). Tightened to the one shape where print is provably wrong
+# regardless of gating: inside `_process`/`_physics_process`/`_draw`. Block-scan
+# by indent (like M1). Outside those callbacks, not flagged — that's the
+# reviewer's judgment call. Advisory: a `print` deliberately gated behind a debug
+# flag *inside* _process is rare but legit, so surface, never block.
+_RE_FUNC_PERFRAME = re.compile(r"^(\s*)func\s+_(?:physics_process|process|draw)\s*\(")
+_RE_PRINT = re.compile(r"\b(?:print|prints|printt|printraw|print_rich|print_debug|printerr)\s*\(")
+
+
+def find_print_in_perframe(masked: list[str]) -> list[tuple[int, str]]:
+    """Flag every print-family call in the body of a per-frame callback (S11).
+    Scoped to the callback block by indent; bounded by MAX_MATCH_ARMS (NASA-2)."""
+    out: list[tuple[int, str]] = []
+    n = len(masked)
+    i = 0
+    while i < n:
+        mo = _RE_FUNC_PERFRAME.match(masked[i])
+        if mo is None:
+            i += 1
+            continue
+        indent = len(mo.group(1))
+        j = i + 1
+        scanned = 0
+        while j < n and scanned < MAX_MATCH_ARMS:
+            line = masked[j]
+            if line.strip() == "":
+                j += 1
+                continue
+            if _indent(line) <= indent:
+                break                           # callback body ended (dedent)
+            scanned += 1
+            if _RE_PRINT.search(line):
+                out.append((j, "S11: print() in a per-frame callback — synchronous I/O every frame; gate behind a debug flag or remove"))
+            j += 1
+        i = max(j, i + 1)
+    return out
+
+
 # C9: redefining an engine method shadows its behavior (silent collision).
 # OBJECT_METHODS exist on every Object; NODE_METHODS only on Node-derived, so
 # they are applied only when the script extends a Node-ish base — a domain
@@ -596,6 +685,51 @@ def find_reserved_overrides(masked: list[str]) -> list[tuple[int, str]]:
         fm = _RE_FUNC_DEF.match(line)
         if fm is not None and fm.group(1) in reserved:
             out.append((idx, "C9: 'func %s()' shadows a reserved Node/Object method — rename (silent collision with engine behavior)" % fm.group(1)))
+    return out
+
+
+# H13 (advisory CORRECT): duck-typed dispatch — `obj.has_method(&"x")` guarding
+# an `obj.call(&"x", ...)` has zero compile-time guarantees: a typo, an arity
+# drift, or a wrong arg type all silently no-op, and `call()` returns Variant
+# (a missing-method null narrows to 0 on `as int`). Two+ bodies sharing behavior
+# → a common base class, dispatch via `is` (style.md H13). Flagged only when the
+# SAME literal name appears in both a has_method() and a .call() in the file —
+# the duck-dispatch smell, near-0 FP. Advisory (not blocking) because genuine
+# reflection (save-system deserialization on unknown user scripts) is a cited
+# legit exception; @tool scripts (editor reflection by design) are skipped whole.
+_RE_HAS_METHOD_LIT = re.compile(r"\bhas_method\(\s*&?(\"|')([^\"']*)\1")
+_RE_CALL_LIT = re.compile(r"\.call\(\s*&?(\"|')([^\"']*)\1")
+
+
+def _code_lits(raw: str, m: str, rx: "re.Pattern[str]") -> list[tuple[int, str]]:
+    # (start, literal) for each match whose call site is code (masked non-blank
+    # at the match start), reading the literal name from raw (masked blanks it).
+    out: list[tuple[int, str]] = []
+    for mo in rx.finditer(raw):
+        if mo.start() < len(m) and m[mo.start()] != " ":
+            out.append((mo.start(), mo.group(2)))
+    return out
+
+
+def find_duck_dispatch(raw_lines: list[str], masked: list[str]) -> list[tuple[int, str]]:
+    """Flag `has_method(&"X")` lines whose literal X is also used in a `.call("X")`
+    somewhere in the file (H13). Skips @tool scripts wholesale (legit reflection).
+    """
+    for ln in raw_lines[:5]:
+        if ln.lstrip().startswith("@tool"):
+            return []
+    call_names: set[str] = set()
+    for idx, raw in enumerate(raw_lines):
+        for _, name in _code_lits(raw, masked[idx], _RE_CALL_LIT):
+            call_names.add(name)
+    if not call_names:
+        return []
+    out: list[tuple[int, str]] = []
+    for idx, raw in enumerate(raw_lines):
+        for _, name in _code_lits(raw, masked[idx], _RE_HAS_METHOD_LIT):
+            if name in call_names:
+                out.append((idx, "H13: duck-typed dispatch — has_method(&\"%s\")+call(&\"%s\"); give the targets a common base class + dispatch via 'is' (typo/arity/type silently no-op)" % (name, name)))
+                break
     return out
 
 
@@ -659,6 +793,14 @@ def lint_file(path: str) -> list[tuple[str, str]]:
     for line_idx, msg in find_reserved_overrides(masked):
         if not suppressed(raw_lines[line_idx], "C9"):
             findings.append((line_idx + 1, "C9", msg))
+
+    for line_idx, msg in find_duck_dispatch(raw_lines, masked):
+        if not suppressed(raw_lines[line_idx], "H13"):
+            findings.append((line_idx + 1, "H13", msg))
+
+    for line_idx, msg in find_print_in_perframe(masked):
+        if not suppressed(raw_lines[line_idx], "S11"):
+            findings.append((line_idx + 1, "S11", msg))
 
     findings.sort(key=lambda f: (f[0], f[1]))
     # Format: 'path:line: RULE [CATEGORY]: body [advisory]'. Messages embed a

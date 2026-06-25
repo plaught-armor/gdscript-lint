@@ -23,11 +23,30 @@ flag conditions; this is the *why* — full symptoms, repros, fixes, and data.
 | [06 — Resource loading](06-resource-loading.md) | preload/load/threaded, cache modes, UID files | drafted |
 | [07 — Architecture types](07-arch-types.md) | scene-tree composition vs DOD vs ECS, comp-vs-inheritance, the escalation ladder — when/why each, sourced | drafted |
 
-**Technique notes** (measured): [Removing dead entities from a list](removing-dead-entities.md) — swap-back vs write-cursor compaction vs the `remove_at` trap; one removal vs mass cull have different best answers (P6 + D2 + D8). · [StringName vs String](stringname-vs-string.md) — use `StringName` (`&"x"`) for identifiers, `String` for text; measured ~1.2×, but it's mostly correctness + engine-API contract, not speed (D10 + P12a/P12b).
-
 Part IV opens with **"The case for DOD (even in GDScript)"** — a position piece (argues one side, not neutral) on why DOD is the default even where the interpreter mutes the cache win: correctness-by-construction, structural speed that survives Variant boxing, alignment with Godot's own server substrate, and the escalation ladder that lands on DOD anyway.
 
-**Worked examples** (the rules composed, runnable + verified): [combat](dod-by-example.md) — enemy-combat subsystem, fat-`Enemy` strawman → data-oriented decomposition (D1–D8 + P6 + C2a); [perception](dod-perception-example.md) — existence-based alert state + the corrected D8 (inline SoA, do-less); [inventory](dod-inventory-example.md) — D11, one registry table with convention-derived assets, no mirror arrays; [object pool](dod-pool-example.md) — P21 free-list + slot reuse, no per-frame alloc; [spatial hash](dod-spatial-example.md) — cell→occupants neighbor queries that touch a constant few cells; [save/load](dod-save-example.md) — relational POD record, ids not objects, with the binary-vs-JSON security boundary; and [stat/upgrade](dod-upgrade-example.md) — a modifier-order transform plus the authoring-equivalence test (generator vs hand-authored `.tres`, locked equal). Each carries a researched "variants & use-cases" section. Backed by `tests/example_dod_*_proj/` and literal runs on 4.8.dev.
+## Worked examples
+
+The rules composed, runnable + verified. Each carries a researched "variants & use-cases" section. Backed by `tests/example_dod_*_proj/` and literal runs on 4.8.dev. Files prefixed `ex-`.
+
+| Example | Covers |
+|---|---|
+| [combat](ex-combat.md) | enemy-combat subsystem, fat-`Enemy` strawman → data-oriented decomposition (D1–D8 + P6 + C2a) |
+| [perception](ex-perception.md) | existence-based alert state + the corrected D8 (inline SoA, do-less) |
+| [inventory](ex-inventory.md) | D11, one registry table with convention-derived assets, no mirror arrays |
+| [object pool](ex-pool.md) | P21 free-list + slot reuse, no per-frame alloc |
+| [spatial hash](ex-spatial.md) | cell→occupants neighbor queries that touch a constant few cells |
+| [save/load](ex-save.md) | relational POD record, ids not objects, with the binary-vs-JSON security boundary |
+| [stat/upgrade](ex-upgrade.md) | modifier-order transform + the authoring-equivalence test (generator vs hand-authored `.tres`, locked equal) |
+
+## Technique notes
+
+Measured single-topic deep-dives. Files prefixed `note-`.
+
+| Note | Covers |
+|---|---|
+| [Removing dead entities](note-removing-dead-entities.md) | swap-back vs write-cursor compaction vs the `remove_at` trap; one removal vs mass cull have different best answers (P6 + D2 + D8) |
+| [StringName vs String](note-stringname-vs-string.md) | use `StringName` (`&"x"`) for identifiers, `String` for text; measured ~1.2×, but mostly correctness + engine-API contract, not speed (D10 + P12a/P12b) |
 
 ## What makes this worth reading
 

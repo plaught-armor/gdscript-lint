@@ -1,7 +1,7 @@
 # DOD by example: an inventory (D11 — no mirror registries)
 
-A third worked subsystem (after [combat](dod-by-example.md) and
-[perception](dod-perception-example.md)), built around **D11**: two parallel
+A third worked subsystem (after [combat](ex-combat.md) and
+[perception](ex-perception.md)), built around **D11**: two parallel
 tables keyed by the same enum aren't a "split" — they're one fact stored twice.
 Runnable: [`tests/example_dod_inventory_proj/`](../tests/example_dod_inventory_proj/),
 verified on 4.8.dev.

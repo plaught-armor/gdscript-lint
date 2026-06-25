@@ -1,6 +1,6 @@
 # DOD by example: a perception system (existence-based + the corrected D8)
 
-A second worked subsystem (after [the combat example](dod-by-example.md)), chosen
+A second worked subsystem (after [the combat example](ex-combat.md)), chosen
 because perception is where two rules earn their keep most visibly: **existence-
 based state (D2)** and the **corrected D8** — a manager wins by *doing less* and by
 working *flat data inline*, not by looping nodes and calling a method per entity.

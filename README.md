@@ -43,11 +43,12 @@ Each finding prints `path:line: RULE [CATEGORY]: message`.
 | C14 | CORRECT | block | typed `Array[T] = range()` → untyped (#110659) |
 | C11 | CORRECT | block | inline `sort_custom` comparator using `<=`/`>=` (must be strict — #58878) |
 | M1 | CORRECT | block | `await` inside `_ready()` (pauses init — use `call_deferred` / separate coroutine) |
+| H4 | CORRECT | block | untyped `signal` params (type them so `connect` can check — #110573) |
 | H1 | PERF | block | `:=` instead of explicit `var x: T =` (static typing ~40% faster) |
 | H2 | PERF | block | untyped `for x in …` (type the loop var) |
 | S6 | PERF | block | `Array[primitive]` where a `Packed*Array` exists |
 | D7b | PERF | block | value-only `match` (~5× dispatch vs `if/elif`) |
-| P12a | PERF | block | bare string to a `StringName` param (use `&"x"`) |
+| P12a | PERF | block | bare string to a `StringName` param, or typed `StringName`/`NodePath` decl init (use `&"x"` / `^"a/b"`) |
 | S1 | STYLE | block | inline lambda (extract to a named method) |
 | S6b | STYLE | block | redundant `Packed*Array()` / `([...])` constructor on a typed assign |
 | S15 | STYLE | block | `== ""` / `.size() == 0` instead of `.is_empty()` |
@@ -57,6 +58,8 @@ Each finding prints `path:line: RULE [CATEGORY]: message`.
 | P22 | PERF | advisory | float `clamp/abs/lerp` → `clampf/absf/lerpf` (~1.3×) |
 | P6 | PERF | advisory | `Array.pop_front()` / `pop_at(0)` — O(n) front-shift (#45455) |
 | H14 | PERF | advisory | `(x as T)` inside `if x is T:` — redundant cast, Variant round-trip |
+| H13 | CORRECT | advisory | `has_method(&"x")` + `call(&"x")` duck-dispatch (give targets a base class + `is`) |
+| S11 | PERF | advisory | `print()` inside `_process`/`_physics_process`/`_draw` — per-frame sync I/O |
 
 **Blocking** = exit 1 (fail the gate). **Advisory** = printed with `[advisory]`,
 exit stays 0 — a non-blocking note. Advisory rules are perf/style preferences

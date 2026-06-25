@@ -61,8 +61,27 @@ Decision from the data:
 - **P22 → advisory PERF.** 1.3× is real, but the typed variant depends on arg
   type (`clamp(int…)` wants `clampi`) — the linter can't tell float from int, so
   it advises, never blocks.
-- **H13, S11 → held.** Modest/marginal perf + real FP surface (legit reflection;
-  can't detect a gated print).
+- **H13 → advisory CORRECT (promoted later).** The 1.2× perf gap is not the point
+  — H13 is a *correctness* rule (typo/arity/wrong-type all silently no-op). Added
+  once scoped tight: flagged only when the SAME literal appears in both a
+  `has_method()` and a `.call()` in the file (the duck-dispatch smell), `@tool`
+  scripts skipped wholesale (editor reflection is legit). Advisory, not blocking,
+  because save-system deserialization on unknown user scripts is a cited legit
+  reflection exception the linter can't distinguish from gameplay duck-dispatch.
+- **S11 → held broad, then added narrow.** The broad "no ungated print" form is
+  unenforceable: a `print()` gated behind a debug flag is indistinguishable from
+  an ungated one on a single line, so flagging it false-positives on every legit
+  debug print. Tightened by adding the missing signal — *frequency*. The measured
+  cost (0.68 µs/call) only bites at per-frame rate, so S11 now fires only inside
+  `_process`/`_physics_process`/`_draw` (block-scan by indent, like M1), where a
+  `print` is a perf bug regardless of gating. One-shot prints in `_ready`/handlers
+  are invisible to the rule — the reviewer's call. Advisory, not blocking (a
+  deliberately-gated debug print inside _process is rare but legit).
+
+**Not in this batch — H4 (signal param types).** Added separately as a blocking
+CORRECT rule (no perf claim, like C9): an untyped `signal foo(a, b)` can't be
+`connect`-checked against its handler (#110573). Exact-shape single-line detect
+(any non-empty param lacking `:`), ~0 FP.
 
 ## Dispatch & call-overhead (bench_dispatch_mechanism.gd)
 
