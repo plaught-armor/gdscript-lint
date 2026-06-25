@@ -8,8 +8,9 @@ runnable subsystems — strawman → data-oriented decomposition, with verified
 output — see the worked examples: [combat](dod-by-example.md) (D1–D8 + P6 + C2a +
 swap-back/cull), [perception](dod-perception-example.md) (existence-based state +
 the corrected D8), [inventory](dod-inventory-example.md) (D11 — one table, no
-mirrors), [object pool](dod-pool-example.md) (P21 free-list + slot reuse), and
-[spatial hash](dod-spatial-example.md) (neighbor queries that do less).
+mirrors), [object pool](dod-pool-example.md) (P21 free-list + slot reuse),
+[spatial hash](dod-spatial-example.md) (neighbor queries that do less), and
+[save/load](dod-save-example.md) (relational POD, ids not objects).
 
 ---
 
