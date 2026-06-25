@@ -1,0 +1,5 @@
+config_version=5
+
+[application]
+config/name="dod_spatial_example"
+run/main_scene="res://main.tscn"
