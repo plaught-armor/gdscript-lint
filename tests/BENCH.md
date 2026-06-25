@@ -201,6 +201,60 @@ Backs Part IV D8. 5000 nodes, identical per-entity work, Godot 4.8.dev, avg over
 The per-Node callback bookkeeping is ~15–19% at N=5000 and grows with entity
 count — real at thousands of entities, irrelevant at dozens (frame-budget rule).
 
+## P6 — Array front-removal is O(n), drain loop is O(n²) (bench_pop_front.gd)
+
+Backs rule P6 ([#45455](https://github.com/godotengine/godot/issues/45455)).
+`pop_front()` / `pop_at(0)` remove the head, which shifts every remaining element
+down one slot. A single call is O(n); a *drain* loop (pop_front until empty) is
+O(n²). This bench drains the same N-element array **four** ways and sweeps N so
+the blow-up is visible against the 16,666 µs (60fps) frame budget — i.e. it
+answers "how large is large?". Godot 4.8.dev, best-of-7, accumulated into a sink.
+
+```bash
+godot --headless --script tests/bench_pop_front.gd
+```
+
+| N | pop_front drain | pop_back drain | index walk | swap-back drain | front/swap |
+|---|---|---|---|---|---|
+| 100 | 4 µs | 3 µs | 1 µs | 5 µs | 0.8× |
+| 1,000 | 118 µs | 35 µs | 16 µs | 53 µs | 2.2× |
+| 10,000 | **9,998 µs** | 341 µs | 156 µs | 520 µs | 19.2× |
+| 50,000 | **252,504 µs** | 1,532 µs | 788 µs | 2,565 µs | 98.4× |
+
+Reading: 10×N → ~85× time (1k→10k) and 5×N → ~25× time (10k→50k) — textbook
+O(n²) for pop_front. The other three are linear: at 50k, pop_back 1.5 ms, index
+walk 0.79 ms, swap-back 2.6 ms — none over one frame, while pop_front is **252 ms
+≈ 15 dropped frames**.
+
+**"Large" pinned by the data:**
+- < ~1,000 elements, or off the per-frame path → free (sub-0.1 ms). Don't worry.
+- A pop_front drain of **~10,000** elements = **~10 ms ≈ 60% of one 60fps frame**;
+  **~12–13k empties the whole budget** in a single frame. That's the threshold
+  where P6 stops being pedantic.
+- The fix is never "a bigger array is fine with pop_back" — it's that pop_back /
+  index / swap-back are all O(n) and stay sub-millisecond-ish at 50k, so the
+  O(n²) shape is the whole problem, not the size.
+
+**On swap-back** (the [SwapBackArray](/mnt/based_backup/Repos/SwapBackArray)
+addon's technique — `SwapBackUtil.remove_at_*` for `Packed*`, `SwapBackArray` for
+Node arrays; here inlined as overwrite-slot-with-last + `resize(-1)`):
+- It is O(1) *per removal* → O(n) to drain, and ~98× faster than pop_front at 50k.
+  (This arm runs on `PackedInt32Array`, the other three on `Array[int]`, so the
+  `front/swap` ratio combines the algorithm delta with a smaller Array-vs-Packed
+  container delta — the O(n²)-vs-O(n) term dominates by orders of magnitude.)
+- For a pure FIFO **drain**, plain `pop_back` is actually cheaper than swap-back
+  (swap-back pays a `resize` per op; pop_back is the engine's tail-drop). Don't
+  reach for swap-back just to empty an array.
+- Swap-back's real niche is the case this drain *understates*: **O(1) removal at
+  an arbitrary index** mid-array (yank an inactive entity from a pool by index)
+  where order doesn't matter — something neither `pop_back` nor an index walk
+  gives you. That's when it beats the O(n) `remove_at(i)` shift, which is the same
+  bug as P6 one element in from the front.
+
+Stays **advisory**: the linter can't see the surrounding loop or the array's
+runtime length, and a front-dequeue of a few dozen items is genuinely free —
+blocking would be noise. The number above is what makes the advice actionable.
+
 ## Promotion criterion
 
 Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:

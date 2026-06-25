@@ -41,6 +41,8 @@ Each finding carries a category — **CORRECT** (bug), **PERF** (speed), **STYLE
 | L3   | `loops.gd`    | `range(N)` / `range(0, N)` flagged; `range(a≠0, b)` / 3-arg not — **advisory** |
 | S15  | `s15.gd`      | `== ""` / `.size() == 0` flagged; `== "x"` / `.is_empty()` not |
 | P12a | `p12a.gd`     | bare string to StringName method flagged; `&"x"` / excluded `get` not |
+| P6   | PERF (advisory) | `p6.gd` | `.pop_front()` / `.pop_at(0)` flagged; `pop_back()` / `pop_at(2)` / string-literal `pop_front(` not |
+| H14  | PERF (advisory) | `h14.gd` | `(x as T)` in an `if x is T:` block flagged; `var s: T = x as T` binding / no-guard downcast / different-type cast / compound guard not |
 | —    | `suppress.gd` | `# gdlint: ignore[H1]` and bare `# gdlint: ignore` suppress |
 | —    | `disabled.gd` | `# gdlint: disable-file` skips the whole file |
 
@@ -69,6 +71,7 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `bench_group_ops.gd` | IV D2a | group membership O(1); `get_nodes_in_group` alloc; `is` vs `is_in_group` |
 | `bench_convention_dispatch.gd` | IV D7a | `keys()[id].to_lower()` vs `if/elif` helper |
 | `bench_dict_access.gd` | I P9 | `d.key` vs `d["key"]` (the #68834 perf gap, fixed 4.4) |
+| `bench_pop_front.gd` | P6 | `pop_front`/`pop_at(0)` drain O(n²) vs `pop_back`/index O(n); sweeps N to pin the frame-budget threshold (#45455) |
 | `autoload_bench_proj/` | III §2 | autoload global-ident call (needs a real project) |
 | `repro_typed_collections.gd` | I (C1/C2/C3/C14/C16) | re-tests const/typed-collection bug status on this build |
 | `repro_lifecycle.gd` | I (C7/C8/C10/H8/M9/C11/C2a + C3.map) | re-tests object-lifecycle bug status |

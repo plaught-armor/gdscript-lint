@@ -53,6 +53,8 @@ Each finding prints `path:line: RULE [CATEGORY]: message`.
 | L2 | PERF | advisory | manual descending `while` counter (descending `range` is ~2× faster) |
 | L3 | STYLE | advisory | `range(N)` count loop (idiom `for i: int in N`; measured break-even) |
 | P22 | PERF | advisory | float `clamp/abs/lerp` → `clampf/absf/lerpf` (~1.3×) |
+| P6 | PERF | advisory | `Array.pop_front()` / `pop_at(0)` — O(n) front-shift (#45455) |
+| H14 | PERF | advisory | `(x as T)` inside `if x is T:` — redundant cast, Variant round-trip |
 
 **Blocking** = exit 1 (fail the gate). **Advisory** = printed with `[advisory]`,
 exit stays 0 — a non-blocking note. Advisory rules are perf/style preferences

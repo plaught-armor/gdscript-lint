@@ -28,6 +28,8 @@ Rules (cite the corpus):
   C14  Array[T] = range()   — typed Array from range() returns untyped (#110659)
   C9   func get_name()/...   — redefining a reserved Node/Object method (collision)
   P22  clamp()/abs()/lerp()  — float math → clampf/absf/lerpf (~1.3x) (advisory)
+  P6   .pop_front()/.pop_at(0) — O(n) front-shift on Array (#45455) (advisory)
+  H14  (x as T) after 'is T'  — redundant cast, 'is' already narrowed (advisory)
 
 Each finding is labelled with a CATEGORY: CORRECT (bug / wrong result), PERF
 (speed), or STYLE (idiom). Output line: 'path:line: RULE [CATEGORY]: msg'.
@@ -171,6 +173,18 @@ _RE_C14_RANGE = re.compile(r":\s*Array\[\w+\]\s*=\s*range\(")
 # f-variant. The (?=[^)]*\d\.\d) requires a float literal so int args
 # (clamp(i, 0, 9), which want clampi) aren't mis-flagged.
 _RE_P22 = re.compile(r"(?<![\w.])(clamp|abs|max|min|floor|ceil|round|lerp)\((?=[^)]*\d\.\d)")
+# P6 (advisory PERF): Array front-removal is O(n) — pop_front shifts every
+# remaining element down one ([#45455]). pop_at(0) is the same shift. Both names
+# are Array-only (no String/Packed* variant) so the method name alone is a near-
+# unambiguous Array signal. The pop_at form requires a literal 0 (a variable
+# index can't be proven to be the front). Advisory because the cost is
+# size x frequency, not size alone: one pop_front of a few-dozen-element array
+# off the hot path is free, so blocking would be noise. It bites two ways —
+# (1) a large array (hundreds+) shifted on a per-frame path, (2) a drain loop
+# (pop_front until empty), where each O(n) shift over N iterations is O(n^2)
+# regardless of starting size. The linter can't see the surrounding loop or the
+# array's runtime length, so it flags the call and lets the human judge both.
+_RE_POP_FRONT = re.compile(r"\.pop_front\(\s*\)|\.pop_at\(\s*0\s*\)")
 
 
 def _range_args(m: str, open_idx: int) -> list[str] | None:
@@ -301,6 +315,17 @@ def rule_p22(raw: str, m: str) -> str | None:
     return None
 
 
+def rule_p6(raw: str, m: str) -> str | None:
+    if _RE_POP_FRONT.search(m):
+        return ("P6: Array.pop_front()/pop_at(0) is O(n) — head removal shifts every element (#45455); "
+                "a drain loop (pop_front until empty) is O(n^2). Measured 4.8.dev (BENCH.md): pop_front-draining "
+                "~10k elements = ~10 ms (~60% of a 16.7 ms frame), ~13k = a whole frame; pop_back / index / swap-back "
+                "are all O(n) and stay sub-millisecond at 10k. Tens of elements off the hot path are free. "
+                "Fix: pop_back() (order flips), an index cursor (no mutation), or swap-with-last + pop_back for "
+                "O(1) remove-at-index when order doesn't matter")
+    return None
+
+
 LINE_RULES: dict[str, object] = {
     "H1": rule_h1,
     "H2": rule_h2,
@@ -313,6 +338,7 @@ LINE_RULES: dict[str, object] = {
     "S15": rule_s15,
     "P12a": rule_p12a,
     "P22": rule_p22,
+    "P6": rule_p6,
     "L1": rule_l1,
     "L3": rule_l3,
 }
@@ -322,13 +348,13 @@ LINE_RULES: dict[str, object] = {
 # confirmed L1 (~1.3x) and P22 (~1.3x) but L1 carries FP and P22 can't tell
 # float from int — both advise, never block. L2/L3 are style only (perf
 # refuted). Promote out of this set only on a measured >=1.3x win + ~0 FP.
-ADVISORY: set[str] = {"L1", "L2", "L3", "P22"}
+ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14"}
 
 # Category per rule: CORRECT (bug / wrong result), PERF (speed), STYLE (idiom).
 CATEGORY: dict[str, str] = {
     "C1": "CORRECT", "C3": "CORRECT", "C9": "CORRECT", "C14": "CORRECT",
     "H1": "PERF", "H2": "PERF", "S6": "PERF", "D7b": "PERF", "P12a": "PERF",
-    "L1": "PERF", "L2": "PERF", "P22": "PERF",
+    "L1": "PERF", "L2": "PERF", "P22": "PERF", "P6": "PERF", "H14": "PERF",
     "S1": "STYLE", "S6b": "STYLE", "S15": "STYLE", "L3": "STYLE",
 }
 
@@ -428,6 +454,52 @@ def find_descending_while(masked: list[str]) -> list[tuple[int, str]]:
     return out
 
 
+# H14 (advisory PERF): a parenthesized cast `(x as T)` inside a block already
+# narrowed by `if x is T:` is redundant — `is` narrowed x to T, so the `as` only
+# adds a Variant round-trip (style.md H14). Conservative on two axes: (1) the
+# guard must be EXACTLY `if <id> is <Type>:` (compound conditions like
+# `if x is T and ...:` are skipped — narrowing still holds but the tight match
+# keeps FP at zero); (2) only the PARENTHESIZED cast is flagged — a binding
+# `var y: T = x as T` has no parens and is the one form H14 explicitly allows
+# ("only `as` when binding to new var"). Same id + same Type required.
+_RE_IF_IS = re.compile(r"^(\s*)if\s+([A-Za-z_]\w*)\s+is\s+([A-Za-z_]\w*)\s*:\s*$")
+
+
+def find_redundant_as_after_is(masked: list[str]) -> list[tuple[int, str]]:
+    """Flag `(x as T)` within the body of an `if x is T:` block — the `is`
+    already narrowed x to T, so the inline cast is a wasted Variant round-trip
+    (H14). Scoped to the true-branch (indent > the `if`'s) and to the exact
+    id+Type pair; bounded by MAX_MATCH_ARMS lines per block (NASA-2).
+    """
+    out: list[tuple[int, str]] = []
+    n = len(masked)
+    i = 0
+    while i < n:
+        mo = _RE_IF_IS.match(masked[i])
+        if mo is None:
+            i += 1
+            continue
+        indent = len(mo.group(1))
+        var = mo.group(2)
+        typ = mo.group(3)
+        cast = re.compile(r"\(\s*" + re.escape(var) + r"\s+as\s+" + re.escape(typ) + r"\s*\)")
+        j = i + 1
+        scanned = 0
+        while j < n and scanned < MAX_MATCH_ARMS:
+            line = masked[j]
+            if line.strip() == "":
+                j += 1
+                continue
+            if _indent(line) <= indent:
+                break                           # true-branch ended (dedent)
+            scanned += 1
+            if cast.search(line):
+                out.append((j, "H14: redundant '(%s as %s)' — 'if %s is %s:' already narrowed it; drop the cast (adds a Variant round-trip)" % (var, typ, var, typ)))
+            j += 1
+        i += 1
+    return out
+
+
 # C9: redefining an engine method shadows its behavior (silent collision).
 # OBJECT_METHODS exist on every Object; NODE_METHODS only on Node-derived, so
 # they are applied only when the script extends a Node-ish base — a domain
@@ -515,6 +587,10 @@ def lint_file(path: str) -> list[tuple[str, str]]:
     for line_idx, msg in find_descending_while(masked):
         if not suppressed(raw_lines[line_idx], "L2"):
             findings.append((line_idx + 1, "L2", msg))
+
+    for line_idx, msg in find_redundant_as_after_is(masked):
+        if not suppressed(raw_lines[line_idx], "H14"):
+            findings.append((line_idx + 1, "H14", msg))
 
     for line_idx, msg in find_reserved_overrides(masked):
         if not suppressed(raw_lines[line_idx], "C9"):
