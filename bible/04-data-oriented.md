@@ -3,7 +3,9 @@
 Code transforms data; it doesn't model "things." POD records + pure transforms,
 state as container membership, references by ID, schema by access pattern.
 
-Draws from [`../rules/dod.md`](../rules/dod.md).
+Draws from [`../rules/dod.md`](../rules/dod.md). For the rules **composed** into
+one runnable subsystem — fat-`Enemy` strawman → data-oriented decomposition,
+with verified output — see the worked example: [DOD by example](dod-by-example.md).
 
 ---
 

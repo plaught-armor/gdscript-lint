@@ -91,6 +91,7 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `repro_cache_proj/` | VI (cache) | dedup-by-path, `has_cached`, CACHE_MODE_REUSE/IGNORE, last-ref-drop frees, `duplicate()` shallow — needs a project |
 | `repro_autoload_classname_proj/` | V (A6) | `class_name` matching an autoload name → fatal "hides an autoload singleton" — needs a project |
 | `repro_static_init_proj/` | V (§4a/§6) | `_static_init` fires at script-LOAD (before `_ready`), only for *reachable* `class_name` classes, exactly once; `make_read_only` lock + `NONE` sentinel hold. **Import first** (`--import`) then run `--path` — uses `class_name` globals |
+| `example_dod_combat_proj/` | bible `dod-by-example.md` | runnable worked example — an enemy-combat subsystem composing D1/D4/D5 (EnemyDef + SoA arrays), D2+P6 (existence + swap-back death), D3 (id refs), D6 (pure CombatSystem), D7 (armor table), D8 (batched tick). **Import first**, then run `--path` — prints the traced wave |
 | `repro_threaded_proj/` | VI (RL26) | `await load_threaded_request` returns an Error int, not the resource — needs a project |
 | `repro_batch_tick_proj/` | IV (D8) | per-Node `_physics_process` vs one manager loop, N=5000 — needs a frame loop |
 
