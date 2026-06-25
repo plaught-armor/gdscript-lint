@@ -29,6 +29,7 @@ Rules (cite the corpus):
   C9   func get_name()/...   — redefining a reserved Node/Object method (collision)
   P22  clamp()/abs()/lerp()  — float math → clampf/absf/lerpf (~1.3x) (advisory)
   C11  sort_custom(func..<=)  — comparator must be strict '<'/'>' (#58878)
+  M1   await in _ready()      — pauses init; call_deferred / separate coroutine
   P6   .pop_front()/.pop_at(0) — O(n) front-shift on Array (#45455) (advisory)
   H14  (x as T) after 'is T'  — redundant cast, 'is' already narrowed (advisory)
 
@@ -371,7 +372,7 @@ ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14"}
 # Category per rule: CORRECT (bug / wrong result), PERF (speed), STYLE (idiom).
 CATEGORY: dict[str, str] = {
     "C1": "CORRECT", "C3": "CORRECT", "C9": "CORRECT", "C14": "CORRECT",
-    "C11": "CORRECT",
+    "C11": "CORRECT", "M1": "CORRECT",
     "H1": "PERF", "H2": "PERF", "S6": "PERF", "D7b": "PERF", "P12a": "PERF",
     "L1": "PERF", "L2": "PERF", "P22": "PERF", "P6": "PERF", "H14": "PERF",
     "S1": "STYLE", "S6b": "STYLE", "S15": "STYLE", "L3": "STYLE",
@@ -519,6 +520,46 @@ def find_redundant_as_after_is(masked: list[str]) -> list[tuple[int, str]]:
     return out
 
 
+# M1 (CORRECT): `await` inside `_ready()` pauses the node's initialization at an
+# unpredictable point — children may be half-set-up, the parent's _ready hasn't
+# run, signals wired in _ready aren't connected yet. Use call_deferred() or a
+# separate coroutine kicked off from _ready (type-async.md M1). Block-scanned:
+# any `await` at deeper indent than the `func _ready(` header belongs to its body
+# (GDScript has no nested named funcs; an inline lambda there is S1's problem and
+# still runs in the _ready frame). `await` elsewhere is fine — only _ready gated.
+_RE_FUNC_READY = re.compile(r"^(\s*)func\s+_ready\s*\(")
+_RE_AWAIT = re.compile(r"\bawait\b")
+
+
+def find_await_in_ready(masked: list[str]) -> list[tuple[int, str]]:
+    """Flag every `await` in the body of `func _ready()` (M1). Scoped to the
+    _ready block by indent; bounded by MAX_MATCH_ARMS lines (NASA-2)."""
+    out: list[tuple[int, str]] = []
+    n = len(masked)
+    i = 0
+    while i < n:
+        mo = _RE_FUNC_READY.match(masked[i])
+        if mo is None:
+            i += 1
+            continue
+        indent = len(mo.group(1))
+        j = i + 1
+        scanned = 0
+        while j < n and scanned < MAX_MATCH_ARMS:
+            line = masked[j]
+            if line.strip() == "":
+                j += 1
+                continue
+            if _indent(line) <= indent:
+                break                           # _ready body ended (dedent)
+            scanned += 1
+            if _RE_AWAIT.search(line):
+                out.append((j, "M1: no 'await' in _ready() — it pauses init at an unpredictable point; use call_deferred() or a separate coroutine"))
+            j += 1
+        i = max(j, i + 1)
+    return out
+
+
 # C9: redefining an engine method shadows its behavior (silent collision).
 # OBJECT_METHODS exist on every Object; NODE_METHODS only on Node-derived, so
 # they are applied only when the script extends a Node-ish base — a domain
@@ -606,6 +647,10 @@ def lint_file(path: str) -> list[tuple[str, str]]:
     for line_idx, msg in find_descending_while(masked):
         if not suppressed(raw_lines[line_idx], "L2"):
             findings.append((line_idx + 1, "L2", msg))
+
+    for line_idx, msg in find_await_in_ready(masked):
+        if not suppressed(raw_lines[line_idx], "M1"):
+            findings.append((line_idx + 1, "M1", msg))
 
     for line_idx, msg in find_redundant_as_after_is(masked):
         if not suppressed(raw_lines[line_idx], "H14"):
