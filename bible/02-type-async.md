@@ -15,7 +15,7 @@ cross-references into [`../rules/engine-bugs.md`](../rules/engine-bugs.md).
 
 ---
 
-## 1. Static typing is the single biggest perf win
+## 2a. Static typing is the single biggest perf win
 
 Static typing is the floor. Every other rule in Part III assumes you've already
 paid this one cost. Typed instructions run measurably faster than the
@@ -29,7 +29,7 @@ The often-quoted figure is "~40–47% faster"; measured on Godot 4.8.dev
 ran **~1.35× (~25–28% faster)** than the same loop untyped. The win is real and
 workload-dependent — 40–47% is the high end, not the typical case. The full
 discussion and the "what's *not* faster" table are in
-[Part III §5](03-performance.md#5-static-typing--the-things-that-are-not-faster).
+[3f](03-performance.md#3f-static-typing--the-things-that-are-not-faster).
 
 **In plain terms:** an untyped variable is a *Variant* — a box that carries its
 own type tag, so every operation first asks "what's in here?" before doing the
@@ -107,7 +107,7 @@ applied to standard library calls.
 
 ---
 
-## 2. Typed-collection traps
+## 2b. Typed-collection traps
 
 **In plain terms:** you can write `Array[Enemy]` on a variable, and the line
 looks type-checked — but some built-in operations hand back a plain untyped
@@ -133,7 +133,7 @@ result.assign(queue.filter(func(p): return is_instance_valid(p)))
 ```
 
 Tracked as [#72566](https://github.com/godotengine/godot/issues/72566). **Re-tested
-on Godot 4.8.dev (see [Part I §4](01-engine-bugs.md#4-typed-filter--map-return-untyped-array)):
+on Godot 4.8.dev (see [1a](01-engine-bugs.md#1a-typed-filter--map-return-untyped-array)):
 `.filter()` now returns a *typed* result — fixed — but `.map()` still returns an
 untyped `Array`.** Until your minimum Godot has both fixed, keep the `assign()`
 habit for both; it's harmless on the already-fixed `.filter()` path. → lint rule
@@ -143,7 +143,7 @@ habit for both; it's harmless on the already-fixed `.filter()` path. → lint ru
 
 `range(N)` returns `Array` (untyped). Assigning the result to `Array[int]`
 silently produces an untyped collection. This is a typing bug, not a loop-speed
-bug — iteration over `for i in range(N)` is fine (Part III §3 measures it as
+bug — iteration over `for i in range(N)` is fine (3d measures it as
 break-even with `for i: int in N`); the breakage is at the *assignment*:
 
 ```gdscript
@@ -258,8 +258,8 @@ signal hit_landed(target: Enemy, damage: int)
 
 **4.8.dev: the win is correctness, not emit speed.** Emitting 1M times to a
 handler via a typed-param signal vs an untyped-param signal measured **~1.00×**
-(`bench_param_types.gd` → H4) — the signal-dispatch cost (≈115 ns/emit; see Part
-III §2) dwarfs any param-typing delta, so you won't find it in a benchmark. The
+(`bench_param_types.gd` → H4) — the signal-dispatch cost (≈115 ns/emit; see 3c)
+dwarfs any param-typing delta, so you won't find it in a benchmark. The
 real reason to type signal params is #110573: a typed signal validates handler
 signatures at `connect` time and documents the payload — a wrong-arity or
 wrong-type handler is caught at the boundary instead of silently receiving a
@@ -326,7 +326,70 @@ in [`../rules/dod.md`](../rules/dod.md) D10/D10a. **4.8.dev: confirmed** —
 
 ---
 
-## 3. Lambdas and capture semantics
+## 2c. Null checks: `not x` vs `x == null` (S9)
+
+**In plain terms:** `if not x:` is *not* a null check. It fires for the whole
+"empty" family — null, zero, `""`, empty containers, `false`, and even a zero
+vector — not just for "unset." If 0 or empty is a real value for `x`, `not x`
+treats it as "nothing" and misfires. Use `x == null` when you specifically mean
+"unset."
+
+`if not x:` tests `x`'s *truthiness*; `if x == null:` is an equality test against
+null. They give the same answer only when the falsy set collapses to "just null"
+— i.e. when `x` is an Object/Node ref. Measured on 4.8.dev
+(`tests/repro_null_checks.gd`):
+
+| `x` | `not x` | `x == null` |
+|---|---|---|
+| `null` | true | true |
+| `0` / `0.0` | true | false |
+| `""` | true | false |
+| `[]` / `{}` | true | false |
+| `false` | true | false |
+| `Vector2.ZERO` / `Vector3.ZERO` | **true** | false |
+| `5` / `"a"` / `[1]` | false | false |
+| freed Node (≥4.4) | true | true |
+
+The standout is the zero-vector row: `Vector2.ZERO` is **falsy**, so
+`if not velocity:` fires when the entity is merely *stationary*. The same trap
+hits every primitive where 0/empty is meaningful — `if not damage:` at 0 damage,
+`if not name:` on `""`, `if not arr:` on an empty (not absent) array.
+
+```gdscript
+# Bad — fires when stationary (Vector2.ZERO is falsy), and at 0 damage / "".
+if not velocity: stop()
+if not damage:   return
+# Good — say exactly what you mean.
+if velocity == Vector2.ZERO: stop()
+if damage == 0:              return
+if attacker == null:         return   # optional Object ref: explicit reads as intent
+```
+
+**Rules:**
+
+- **Primitive / vector where 0 or empty is a valid value** → never `not x`. Use
+  `x == null` (if nullable) or the explicit test you actually mean: `x == 0`,
+  `x.is_empty()`, `vec == Vector2.ZERO`.
+- **Object / Node ref, optional** → `if x == null:` reads as intent and sidesteps
+  the freed-Node truthiness history (**H8**,
+  [#59816](https://github.com/godotengine/godot/issues/59816) — on ≤4.3 both `not`
+  and `== null` lied about a freed Node; fixed 4.4). For a node that may be freed
+  out from under you, `is_instance_valid(x)` is the belt-and-suspenders check
+  (Part I, C5/C8).
+- **`if not x` is correct** only when null *and* 0 *and* empty *and* false all
+  genuinely mean "absent" — then it's the concise, right form.
+
+**Perf is not the tiebreaker.** `== null` is marginally cheaper — `not x` first
+materializes `x` as a bool (a type-dispatched truthiness cast on a `Variant`)
+then negates, while `== null` is one direct compare — but measured the gap is a
+wash-to-~1.2× over 2M iterations: single-digit-ns, far below the frame budget.
+Choose on correctness; the speed is a rounding error (same verdict as H1 `:=`,
+H4 typed signals). Not lintable — the right form depends on `x`'s static type,
+which a text linter can't see — so this stays a reviewer / `style.md` **S9** call.
+
+---
+
+## 2d. Lambdas and capture semantics
 
 **In plain terms:** a lambda is a small inline function. Two surprises bite
 people regularly: writing the body inline can confuse the auto-formatter, and
@@ -418,7 +481,7 @@ the outer `local_v` at `0` (captured by value) while `_member_v` becomes `1`
 
 ---
 
-## 4. `await` and coroutines
+## 2e. `await` and coroutines
 
 **In plain terms:** `await` pauses your function and continues it later — when
 some signal fires. While it's paused, the world keeps moving: the thing you
@@ -685,7 +748,7 @@ nested array's contents.
 
 ---
 
-## 5. Node method-name collisions
+## 2f. Node method-name collisions
 
 **In plain terms:** Godot's built-in `Node` class already owns a long list of
 method names (`get_name`, `get_path`, `get_owner`, and so on). If you write a
@@ -725,7 +788,7 @@ engine to drive `@export`, signals, and serialization. Treat the entire
 
 ---
 
-## 6. `@onready` and the H9 setter trap
+## 2g. `@onready` and the H9 setter trap
 
 **In plain terms:** `@onready` says "set this variable just before `_ready`
 runs." If the variable has a custom setter (a small function that runs on
@@ -777,7 +840,7 @@ shape. → **H9**.
 
 ---
 
-## 7. Typed math functions in hot paths
+## 2h. Typed math functions in hot paths
 
 **In plain terms:** for common math like clamp/abs/max, GDScript ships two
 versions — a general one that works on any number type, and a specific one
@@ -791,7 +854,7 @@ The standard library has typed variants for the common math operations:
 (`clamp`/`abs`/`max`) force Variant dispatch on their arguments, which is a
 measurable cost in a `_process` / `_physics_process` / `_draw` body.
 
-Part III §4 measures this: in a tight loop of 2M iterations on Godot 4.8.dev,
+3e measures this: in a tight loop of 2M iterations on Godot 4.8.dev,
 typed `clampf`/`absf`/`maxf` came in **~1.30× faster** than the untyped
 variants on float arguments. Real, ~30% in tight float loops — not enormous,
 but free.

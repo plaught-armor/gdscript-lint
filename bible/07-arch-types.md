@@ -24,7 +24,7 @@ Four paradigms compete for the "how is this game structured at the bones" slot:
    entities are IDs, components are columnar storage, systems iterate.
 
 The honest through-line, supported by both the engine maintainers and the
-measured numbers in §5: **in Godot 4.x you use the scene tree until a profiler
+measured numbers in 7e: **in Godot 4.x you use the scene tree until a profiler
 says otherwise, and when it does, the next step is almost always
 `MultiMesh` + the servers — not an ECS framework.** ECS earns its keep at a
 scale most projects never reach. The sections below give the *when* for each,
@@ -45,7 +45,7 @@ sources conflict, both are cited and the conflict is named.
 
 ---
 
-## 1. The Godot-native paradigm: scene-tree composition
+## 7a. The Godot-native paradigm: scene-tree composition
 
 **In plain terms:** Godot's built-in way is to build small reusable "scenes"
 (like prefabs) and nest them inside each other to make bigger ones. Save one
@@ -127,13 +127,13 @@ The official optimization guidance agrees from the other direction: bypassing
 nodes is "reserved for when other avenues of optimization have been exhausted"
 ([using_servers](https://docs.godotengine.org/en/stable/tutorials/performance/using_servers.html)).
 
-§5 has the measured break-down points. The short version: the scene tree stops
+7e has the measured break-down points. The short version: the scene tree stops
 being free somewhere in the low thousands of *actively-processing* nodes, and
 much sooner for physics bodies.
 
 ---
 
-## 2. Composition vs inheritance — three axes, kept distinct
+## 7b. Composition vs inheritance — three axes, kept distinct
 
 **In plain terms:** "composition over inheritance" is a popular slogan, but in
 Godot it can mean three totally different things depending on whether you're
@@ -217,7 +217,7 @@ scene — keep the parent's layout, override a few children. It shares how thing
 are set up, not what they do, and the editor still has long-standing bugs
 around it. Use it only for the narrow "shared skeleton" case.
 
-This is Part V §4d. The docs are explicit about its *limit*: "Scenes can define
+This is 5dd. The docs are explicit about its *limit*: "Scenes can define
 how an extended class initializes, but not what its behavior actually is"
 ([scenes_versus_scripts](https://docs.godotengine.org/en/stable/tutorials/best_practices/scenes_versus_scripts.html))
 — it shares **setup/shape, not behavior**. And it carries real, still-live 4.x
@@ -227,7 +227,7 @@ footguns that argue for keeping it to the narrow `_pickup_base.tscn` case:
   ([#3084](https://github.com/godotengine/godot-proposals/issues/3084)).
 - Renaming a base node breaks every derived scene — no stable scene-local ID
   ([#6291](https://github.com/godotengine/godot-proposals/issues/6291)). (This
-  is the exact constraint Part V §4d warns about: "don't rename base children
+  is the exact constraint 5dd warns about: "don't rename base children
   without sweeping derived scenes.")
 - Root-of-parent-scene edits don't always propagate to inherited instances
   ([#113981](https://github.com/godotengine/godot/issues/113981)).
@@ -248,7 +248,7 @@ in the SceneTree, so the Axis-C footguns don't apply.
 
 ---
 
-## 3. Data-oriented design in Godot
+## 7c. Data-oriented design in Godot
 
 **In plain terms:** data-oriented design says: programs are mostly about turning
 data into other data, so design the data first and write small functions that
@@ -299,7 +299,7 @@ without C++ cache locality:
   allocating a fresh Array per call
   ([#7080](https://github.com/godotengine/godot-proposals/issues/7080)).
 - **Batched manager loop over per-Node `_process`** — Part IV **D8**. The
-  measured payoff is in §5.
+  measured payoff is in 7e.
 - **Per-member state in `Dictionary[int, Record]` keyed by `get_instance_id()`**
   — the SoA-without-structs workaround, since GDScript has no struct type
   ([#7329](https://github.com/godotengine/godot-proposals/issues/7329),
@@ -320,7 +320,7 @@ caches… [but] an approach to solving problems" (Sander Mertens, *flecs* author
 [yoyo-code: DOD is not ECS](https://yoyo-code.com/data-oriented-design-is-not-ecs/)).
 You can — and in GDScript usually should — do DOD with a manager owning a typed
 `Array` and a couple of `Packed*Array`s, with **no ECS framework at all**. ECS
-(§4) is one implementation of DOD, not its definition.
+(7d) is one implementation of DOD, not its definition.
 
 ### When DOD is worth it, when it's premature
 
@@ -344,7 +344,7 @@ refactor is moving a needle that isn't the bottleneck.
 
 ---
 
-## 4. Entity-Component-System (ECS)
+## 7d. Entity-Component-System (ECS)
 
 **In plain terms:** ECS is a particular architecture where every game thing is
 just an ID number, its data lives in big parallel tables (one column per kind
@@ -417,7 +417,7 @@ hit different workloads.**
 
 ---
 
-## 5. The escalation ladder (and the measured thresholds)
+## 7e. The escalation ladder (and the measured thresholds)
 
 **In plain terms:** don't pick your architecture up front. Start with the
 default scene tree; if it gets slow, climb one rung at a time — batch processing

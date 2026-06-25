@@ -150,7 +150,7 @@ dispatch that fits.
 
 ---
 
-## 1. POD data, pure transforms (D1, D6)
+## 4a. POD data, pure transforms (D1, D6)
 
 **In plain terms:** keep *what a thing is* (its fields) apart from *what you do
 to it* (the code). The data class just holds values; the work happens in a
@@ -215,7 +215,7 @@ of the call matches the shape of the work. → D8, below.
 
 ---
 
-## 2. Existence-based processing (D2, D2a)
+## 4b. Existence-based processing (D2, D2a)
 
 **In plain terms:** instead of a true/false flag on every object ("is this one
 dead?"), keep a *list of the ones it's true for*. Being in the list **is** the
@@ -349,7 +349,7 @@ load-bearing, and it's the next point.
 **In plain terms:** a group is a label registered on the *whole* scene tree, not
 on any one node or subtree. Anyone, anywhere, can join `&"alive"` or ask for
 everyone in it. That global reach is exactly why groups want rationing — the same
-discipline an autoload singleton gets (§8).
+discipline an autoload singleton gets (4h).
 
 A group lives in the `SceneTree`'s single `HashMap<StringName, Group>`,
 process-global. `get_nodes_in_group(&"alive")` returns *every* tagged node in the
@@ -371,8 +371,8 @@ kills its enemies, a room that owns its occupants — that owner holds the
 membership directly, in a typed `Array[T]` (contiguous, typed iteration,
 save-friendly) or a `Dictionary[int, T]` keyed by id (per-subset metadata). No
 group: the owner already *is* the source of truth, and its array has the locality
-a tree-scattered group set cannot. This is the shape §4 (split by access pattern)
-and §8 (the manager's cached `_alive`) already land on — and once the owner sees
+a tree-scattered group set cannot. This is the shape 4d (split by access pattern)
+and 4g (the manager's cached `_alive`) already land on — and once the owner sees
 every transition, the group is a global registry it doesn't need.
 
 ```gdscript
@@ -402,7 +402,7 @@ door.add_to_group(&"interactable")   # the player's raycast queries the whole tr
 | owned by one manager / room that sees every add + remove | that owner's typed `Array[T]` | locality, typed, save-friendly, no global name |
 | per-entity data on a subset | `Dictionary[int, T]` keyed by id | answers "what data", not just "in the set" |
 
-The §2 principle is unchanged — **state is membership, not a flag**. What this adds
+The 4b principle is unchanged — **state is membership, not a flag**. What this adds
 is the second question: *whose* membership, at *what* scope. A group is one of
 three containers, not the default; spend it when the set is genuinely global and
 decoupled, keep it local otherwise. A group is a global tool — spend it like one.
@@ -413,7 +413,7 @@ verified output ([`tests/example_dod_membership_proj/`](../tests/example_dod_mem
 
 ---
 
-## 3. References by integer ID (D3)
+## 4c. References by integer ID (D3)
 
 **In plain terms:** when you need to remember *another* object that might get
 deleted out from under you, don't hold the object — hold its ID number, and look
@@ -452,7 +452,7 @@ Five things this buys:
 3. **Save-friendly.** An ID is an int. A live `Node` ref is not, and you can't
    round-trip it through `var_to_str` / `JSON.stringify`.
 4. **Existence-based shape falls out for free.** `Dictionary[int, T]` keyed by
-   ID is the natural per-subset container — see §2.
+   ID is the natural per-subset container — see 4b.
 5. **External indexing without invasive bookkeeping.** A combat log keyed by
    attacker ID doesn't need every potential attacker to register itself
    anywhere; the IDs are already there.
@@ -470,7 +470,7 @@ type, and reads cleaner. If you can't prove it, use the ID.
 
 ---
 
-## 4. Split by access pattern, not domain object (D4)
+## 4d. Split by access pattern, not domain object (D4)
 
 **In plain terms:** don't put all 30 of an enemy's fields in one `Enemy` class
 just because "an enemy is one thing." Group fields by *which system uses them* —
@@ -490,7 +490,7 @@ A worked example:
   decision tree have entries.
 - **Inventory** — a `Dictionary[int, Array[ItemRecord]]` keyed by entity ID.
   Most NPCs don't have one; they don't have an entry.
-- **Perception** — `&"alerted"` group. Membership *is* the state (see §2).
+- **Perception** — `&"alerted"` group. Membership *is* the state (see 4b).
 
 The save format inherits the same split. A `SaveSlot` is **relational**:
 `position_data`, `inventory_data`, `quest_state`, `room_state` — separate
@@ -516,7 +516,7 @@ they're two different access patterns and the data wants to be split.
 
 ---
 
-## 5. Hot/cold split (D5)
+## 4e. Hot/cold split (D5)
 
 **In plain terms:** the values that change every frame (position, health) should
 live apart from the values fixed for a whole *kind* of thing (max health, model,
@@ -550,7 +550,7 @@ data is in the wrong place — it should be a new `EnemyDef.tres`.
 
 ---
 
-## 6. Condition tables over branch chains (D7)
+## 4f. Condition tables over branch chains (D7)
 
 **In plain terms:** when you have a long `if/elif` that just maps one fixed set
 of inputs to outputs, make it a lookup table instead. Adding a case becomes
@@ -629,7 +629,7 @@ Use `if/elif` for the body — value-only dispatch on `id`, not pattern matching
 This is the place where data-oriented design and Part III converge directly.
 The measured numbers (`bench_dispatch_mechanism.gd`, 600k rows, best-of-7,
 Godot 4.8.dev; baseline = `Array[Callable]` table = 1.00×) live in
-[Part III §1](03-performance.md#1-dispatch--match-vs-ifelif-vs-a-callable-table)
+[3b](03-performance.md#3b-dispatch--match-vs-ifelif-vs-a-callable-table)
 in full. The short version: a value-only `match` is the *slowest* dispatch in
 GDScript, slower even than the `Array[Callable]` table it would replace
 (0.67× at 3 arms, 0.41× at 6).
@@ -676,7 +676,7 @@ loud (or a boot-time validator), exactly as you'd keep `match`'s `_:` arm.
 
 ---
 
-## 7. Batched homogeneous processing over per-Node ticks (D8)
+## 4g. Batched homogeneous processing over per-Node ticks (D8)
 
 **In plain terms:** the instinct is "one manager looping the entities must beat N
 entities each ticking themselves." Measured, that's only true if the manager
@@ -701,7 +701,7 @@ Two surprises:
 
 - **A manager looping nodes and calling `e.tick()` per entity is ~2× SLOWER than
   letting them self-process.** A GDScript instance-method call is the
-  ~5.3×-inline tier of §8's ladder; the engine's native `_physics_process`
+  ~5.3×-inline tier of 4h's ladder; the engine's native `_physics_process`
   dispatch is cheaper. You pay N calls either way, and the loop adds array
   iteration on top. (This corrects an earlier toggle-in-one-scene repro that
   reported a slight manager *win* — an A/B-ordering artifact; see BENCH.md.)
@@ -712,7 +712,7 @@ Two surprises:
   difference.
 
 So D8 is really two claims, and only one is about dispatch speed. The fast form
-is **SoA**, the shape §4 already pushes: state in manager-owned `Packed*Array`s,
+is **SoA**, the shape 4d already pushes: state in manager-owned `Packed*Array`s,
 the tick a flat loop over indices with no per-slot method call (the worked
 example's `EnemyManager.tick()` is exactly this). The form below — a manager
 looping `Enemy` nodes — does **not** win on dispatch:
@@ -728,7 +728,7 @@ func _physics_process(delta: float) -> void:
                                         #   ~2× SLOWER than per-node, not faster
 ```
 
-Its value is **not** dispatch speed — it's the control §2 buys. `_alive` already
+Its value is **not** dispatch speed — it's the control 4b buys. `_alive` already
 excludes the dead, and you can split `_alive_near` / `_alive_far` and tick the
 far group every Nth frame. **The work that doesn't happen is the cheapest work in
 the program** — and *that*, not a cheaper loop, is why a manager earns its keep
@@ -760,7 +760,7 @@ the set.
 
 ---
 
-## 8. Dispatch — static, autoload, signal (D9, P18)
+## 4h. Dispatch — static, autoload, signal (D9, P18)
 
 **In plain terms:** there are several ways to call a helper, and they cost
 different amounts. Cheapest is a `static func` on a `class_name`'d class.
@@ -769,7 +769,7 @@ decoupling), not because they're convenient.
 
 When a helper is stateless, the cheapest dispatch is a `static func` on a
 `class_name`'d RefCounted. The full cost ladder is in
-[Part III §2](03-performance.md#2-call-overhead--indirection) — the relevant
+[3c](03-performance.md#3c-call-overhead--indirection) — the relevant
 lines, baseline = inlined expression = 1.00×:
 
 | Path | × inline |
@@ -825,7 +825,7 @@ Concretely:
 
 ---
 
-## 9. Enums vs StringNames at API boundaries (D10, D10a)
+## 4i. Enums vs StringNames at API boundaries (D10, D10a)
 
 **In plain terms:** for a fixed list of named options (states, item kinds), use
 an `enum` — it's an integer the compiler checks, so a typo won't compile. Use
@@ -877,14 +877,14 @@ cast or a corrected type, and warnings at non-boundary sites are bugs.
 
 ---
 
-## 10. Mirror registries are coupling, not split (D11)
+## 4j. Mirror registries are coupling, not split (D11)
 
 **In plain terms:** don't keep two lists that must stay the same length, lined
 up by the same index. That's not "splitting data" — it's storing one fact twice,
 and now every change has to touch both. The tell is a test that checks the two
 lists are the same size.
 
-§4 says "split by access pattern, not domain object." It does **not** mean
+4d says "split by access pattern, not domain object." It does **not** mean
 "carry two parallel arrays keyed by the same `enum Id`" — that's coupling
 expressed as two files.
 

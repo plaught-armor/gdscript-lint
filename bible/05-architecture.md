@@ -19,7 +19,7 @@ new project.
 
 ---
 
-## 1. Directory layout
+## 5a. Directory layout
 
 **In plain terms:** a fixed set of folders, each with one job. Data files
 (designer-tunable) sit in `resources/`; code sits in `scripts/`; scenes sit in
@@ -74,7 +74,7 @@ The two domain dirs that occasionally trip people up:
 
 ---
 
-## 2. Canonical autoloads, and the ones that aren't autoloads
+## 5b. Canonical autoloads, and the ones that aren't autoloads
 
 **In plain terms:** most projects need a handful of "always-available"
 helpers — a sound hub, a save system, a place to keep collision-layer numbers.
@@ -90,7 +90,7 @@ along one axis: **does this need state?**
 - **No state, just static functions or constants → `class_name`'d RefCounted, no
   autoload entry.**
 
-The autoload pays a per-call indirection cost (Part III §2, measured 4.8.dev:
+The autoload pays a per-call indirection cost (3c, measured 4.8.dev:
 autoload global identifier ≈ 5.7× inline; a static func on a `class_name`'d
 RefCounted ≈ 4.1×).
 That's a small constant, but the more important difference is *semantic*: an
@@ -113,7 +113,7 @@ genuinely shows up (a cache, an RNG seed, a signal to emit). The reverse —
 demoting an autoload to static-only — almost never happens, because once a
 signal exists, removing it is a refactor across every subscriber.
 
-### 2a. Autoload scripts must NOT declare `class_name`
+### Autoload scripts must NOT declare `class_name`
 
 **In plain terms:** if you've already given a script a global nickname by
 registering it as an autoload, don't also give it the same nickname via
@@ -154,7 +154,7 @@ no `class_name`.
 
 ---
 
-## 3. Naming by kind
+## 5c. Naming by kind
 
 **In plain terms:** the language doesn't tell you at a glance whether a file
 holds data, holds behavior, or runs the game. So tack on a small suffix
@@ -188,11 +188,11 @@ Two non-obvious points:
   `Enemy.AlertState`. There is no global `Enums.gd` god-class. The reason is
   ownership: when you change a label, the change lives next to the code that
   acts on it, not in a file every system has to import. The decision rubric in
-  §6 covers the `enum` vs `StringName` choice.
+  5f covers the `enum` vs `StringName` choice.
 
 ---
 
-## 4. Subsystem shape templates
+## 5d. Subsystem shape templates
 
 **In plain terms:** four ready-made layouts for the parts every game ends up
 building — a master list of items, a thing that updates lots of enemies at
@@ -203,7 +203,7 @@ These are not abstract patterns — they are the concrete file shapes that the
 rest of this part assumes. Each template carries a label like *(D1 + D11 + C2a)*
 naming the data-oriented and engine-bug rules it satisfies.
 
-### 4a. Registry (D1 + D11 + C2a)
+### Registry (D1 + D11 + C2a)
 
 **In plain terms:** one master list of everything in a category — every
 item, every enemy kind. It's read by every system, so it has to be locked
@@ -301,7 +301,7 @@ lexical reference within the loaded script). If you need a registry to init at
 boot, the load-bearing requirement is that *some boot-loaded script names it* —
 the `_ready` body is just a convenient, guaranteed-reachable place to do so.
 
-### 4b. Manager (batched-tick, D8)
+### Manager (batched-tick, D8)
 
 **In plain terms:** instead of every enemy asking the engine "update me"
 every frame, one Manager keeps a list of all the live enemies and updates
@@ -313,7 +313,7 @@ their work simply doesn't happen.
 A manager owns the per-frame loop for N entities of one kind. The per-entity
 script does not run `_physics_process` — the manager does, once, over its
 cached collection. This is the D8 batched-tick rule made concrete — but heed
-D8's measured correction (Part IV §8): centralizing the *call* (a `tick()` per
+D8's measured correction (4g): centralizing the *call* (a `tick()` per
 node) is **not** itself a speed-up — it measured ~2× *slower* than per-node
 `_physics_process`. The manager earns its keep through the **control** it
 enables — skip the dead, LOD the distant — and, for the dispatch win, going
@@ -331,7 +331,7 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
     for e: Enemy in _alive:               # typed for (H2)
         e.tick(delta)                     # a call per entity — for CONTROL, not a
-                                          # dispatch win (§8: ~2× slower than per-node)
+                                          # dispatch win (4g: ~2× slower than per-node)
 ```
 
 Per-enemy `set_physics_process(false)` in `_ready` — Manager owns the loop.
@@ -345,9 +345,9 @@ death, and the manager updates `_alive` on the edge.
 `class_name EnemyManager` here assumes the Manager is a **scene-root node**
 (instanced in a scene, where `class_name` is correct and gives you the type).
 If instead you register it in `[autoload]`, **drop the `class_name`** (autoload
-name collides with it — see §2a) and access it by the autoload name.
+name collides with it — see 5b) and access it by the autoload name.
 
-### 4c. HUD facade (M11 + M12)
+### HUD facade (M11 + M12)
 
 **In plain terms:** instead of every gameplay system reaching directly into
 each on-screen widget (health bar, reticle, menu), give it one `HUD` object
@@ -389,7 +389,7 @@ compile-time errors on misconfig, and the facade pattern means a controller
 that needs three widgets doesn't import three widget classes — it imports
 `HUD` and calls three getters.
 
-### 4d. Pickup scene — scene inheritance
+### Pickup scene — scene inheritance
 
 **In plain terms:** when ten item-pickup scenes are nearly identical,
 make one "base" scene with the shared parts and have the others inherit
@@ -415,7 +415,7 @@ depend on by name.
 
 ---
 
-## 5. The decision rubric
+## 5e. The decision rubric
 
 **In plain terms:** a one-line cheat sheet for the small choices that come up
 again and again. Pick the default in the table unless you have a specific
@@ -433,7 +433,7 @@ up on a new subsystem.
 | Set ID: `is Player` or `is_in_group(&"player")`? | `is Player` when class-narrowing fits — same O(1), compile-time-checked | [`dod.md`](../rules/dod.md) D2a |
 | Membership container: group or owner-held array? | group only if tree-wide + decoupled consumers + no single owner; else the owner's typed `Array[T]` / `Dictionary[int, T]` | [`dod.md`](../rules/dod.md) D2b |
 | Helper: static-RefCounted or autoload Node? | static-RefCounted; promote only when state needed | [`dod.md`](../rules/dod.md) D9 |
-| `class_name` on an autoload script? | No — collides with the autoload name (`Class hides an autoload singleton`). Bare `extends Node`, access by autoload name | §2a above |
+| `class_name` on an autoload script? | No — collides with the autoload name (`Class hides an autoload singleton`). Bare `extends Node`, access by autoload name | 5b above |
 | Cross-system / serialized ref: object or ID? | Integer ID + resolve at use site; object refs only for parent→child + sibling-by-injection | [`dod.md`](../rules/dod.md) D3 |
 | Sibling ref inside scene: `@export NodePath` or typed `init_*()`? | Typed `init_*()` push-injection from scene-root script | [`style.md`](../rules/style.md) M11 |
 | Dispatch chain >5 arms: `if/elif` or `Dictionary` lookup? | Dict keyed by discriminator; designer-tunable → move to `.tres` | [`dod.md`](../rules/dod.md) D7 |
@@ -453,7 +453,7 @@ genuine reasons to deviate.
 
 ---
 
-## 6. Boot order
+## 5f. Boot order
 
 **In plain terms:** the always-available helpers load in the order listed in
 the project file, and that order matters when one of them depends on another.
@@ -486,7 +486,7 @@ registry, the crash fires before any gameplay code runs.
 which is exactly what you don't want at boot. `OS.crash` after `push_error` is
 the pair: the error gives you the diagnostic, the crash stops the bleed.
 
-One measured caveat on *when* this fires (full repro in §4a): a registry's
+One measured caveat on *when* this fires (full repro in 5da): a registry's
 `_static_init` validation runs at the **load** of the first boot-loaded script
 that names it, which is **before** `RegistryRoot._ready` executes — not at the
 `_ready` reference statement. So the crash, if a `.tres` is missing, can fire
@@ -498,7 +498,7 @@ precondition for boot-time validation. See `tests/repro_static_init_proj/`.
 
 ---
 
-## 7. When to break the skeleton
+## 5g. When to break the skeleton
 
 **In plain terms:** the layout above is the starting default, not a law. A
 tiny tool, a game jam entry, or a genuinely unusual project gets to ignore
@@ -511,7 +511,7 @@ The skeleton is the *default*, not the prescription. Break it when:
   earn `autoloads/` + `scripts/{data,systems,nodes}/` + `resources/`. Flatter
   directory, fewer suffixes, less rigor — the layout exists to keep a
   ten-system project legible, not a fifty-line script.
-- **Genuinely novel domain.** No existing rule fits, and the rubric in §5
+- **Genuinely novel domain.** No existing rule fits, and the rubric in 5e
   doesn't have a row for the question you're asking. Carry the local
   convention in a project-level `CLAUDE.md` or `rules/` override. If the same
   delta shows up on a second project, promote it back here.
@@ -546,4 +546,4 @@ fail loud with `OS.crash`. Per-frame loops live on a manager, not on N
 entities. Sibling refs inside a scene are typed `init_*()` push-injection, not
 `@export NodePath`. Cross-system refs are integer IDs, resolved at the use
 site. Mirror registries — two arrays keyed by the same enum — are coupling,
-not a split. When in doubt, the decision rubric in §5 has the default.
+not a split. When in doubt, the decision rubric in 5e has the default.

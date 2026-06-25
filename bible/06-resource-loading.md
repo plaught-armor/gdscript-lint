@@ -20,7 +20,7 @@ Draws from [`../rules/resource-loading.md`](../rules/resource-loading.md).
 
 ---
 
-## 1. Rule of thumb
+## 6a. Rule of thumb
 
 **In plain terms:** Godot gives you three ways to bring a file into the game,
 and they bill you at different times. `preload` reads the file the moment the
@@ -70,7 +70,7 @@ pulls everything below it into boot.
 
 ---
 
-## 2. Cache semantics — strong-refcount, no weak tier
+## 6b. Cache semantics — strong-refcount, no weak tier
 
 ResourceLoader's cache is **strong-refcount**. There is no separate "weak
 cache." A loaded resource stays in memory as long as any code holds a
@@ -149,7 +149,7 @@ gameplay code, the default is the right answer.
 
 ---
 
-## 3. Don't roll your own cache
+## 6c. Don't roll your own cache
 
 **In plain terms:** Godot's loader already remembers what it's already loaded —
 ask for the same file twice, you get the same copy both times. Building your
@@ -187,7 +187,7 @@ Either fix removes the parallel table and the parity test that guarded it.
 
 ---
 
-## 4. Don't `ResourceLoader.exists()` after boot validate
+## 6d. Don't `ResourceLoader.exists()` after boot validate
 
 **In plain terms:** if you've already checked at startup that every file your
 game needs is there, checking again every time you load one is wasted work.
@@ -221,7 +221,7 @@ the wrong layer.
 
 ---
 
-## 5. Editor-gate expensive validators
+## 6e. Editor-gate expensive validators
 
 **In plain terms:** some startup checks are cheap (does this file exist, is it
 the right type), some are expensive (actually build the scene and walk every
@@ -264,7 +264,7 @@ gate.
 
 ---
 
-## 6. No bidirectional `.tres ↔ .tscn` ext_resource
+## 6f. No bidirectional `.tres ↔ .tscn` ext_resource
 
 **In plain terms:** if a scene file points at a data file and the data file
 also points back at the scene, Godot can get caught in a loop trying to load
@@ -321,7 +321,7 @@ referenced; it should not reference back. `.tscn`'s and code reach into
 
 ---
 
-## 7. UID files (`.uid` sidecars) — commit them
+## 6g. UID files (`.uid` sidecars) — commit them
 
 **In plain terms:** every file in a Godot project has a hidden ID number, and
 scenes use the ID — not the file path — to find what they reference. That ID
@@ -362,7 +362,7 @@ move silently snaps every link.
 
 ---
 
-## 8. Miscellaneous
+## 6h. Miscellaneous
 
 A handful of smaller rules that don't justify a section each:
 
@@ -387,7 +387,7 @@ A handful of smaller rules that don't justify a section each:
 - **`ResourceLoader.has_cached(path)`** is a free check — use it when you
   want to *decide* between a sync `load()` and a threaded prewarm, not when
   you already know you'll call `load()` regardless. As a guard before
-  `load()`, it's the same shape error as the `exists()` antipattern in §4.
+  `load()`, it's the same shape error as the `exists()` antipattern in 6d.
 - **Don't `await ResourceLoader.load_threaded_request(...)`** — it's not a
   coroutine. The threaded API is poll-based: request, poll status, get when
   loaded. **4.8.dev: confirmed** (`tests/repro_threaded_proj/` → RL26) — `await

@@ -21,7 +21,7 @@ check the call is even in the running.
 
 ---
 
-## 0. Hot paths and cold paths
+## 3a. Hot paths and cold paths
 
 **In plain terms:** "hot" means code that runs over and over each second (every
 frame, or inside a big loop); "cold" means code that runs once in a while (boot,
@@ -77,12 +77,12 @@ and move the cold fields out to a single shared resource (one `EnemyDef` referen
 by all enemies of that kind). The hot loop then touches less memory per iteration,
 and the cold data lives in one tunable place instead of being copied onto every
 instance. The full treatment — with the existence-based and shared-`Def` patterns —
-is in [Part IV §5 (hot/cold data split, D5)](04-data-oriented.md). The through-line:
+is in [4e (hot/cold data split, D5)](04-data-oriented.md). The through-line:
 **spend your effort where the work actually repeats, in both code and data.**
 
 ---
 
-## 1. Dispatch — `match` vs `if/elif` vs a Callable table
+## 3b. Dispatch — `match` vs `if/elif` vs a Callable table
 
 **In plain terms:** when you need to pick between several actions based on the
 value of one thing (a kind, a state, a tag), there are three usual ways to write
@@ -137,7 +137,7 @@ expressiveness is the point. → lint rule **D7b**.
 
 ---
 
-## 2. Call overhead & indirection
+## 3c. Call overhead & indirection
 
 **In plain terms:** every step the engine takes to figure out *which* function to
 run is work on top of the function itself. A direct call is cheap; going through
@@ -165,7 +165,7 @@ scaling, both stable across runs:
 measured separately — `tests/autoload_bench_proj/` — against the same inline
 baseline.)
 
-**In plain terms:** in this table higher means *slower* (the opposite of §1's
+**In plain terms:** in this table higher means *slower* (the opposite of 3b's
 table) — the inline baseline is 1.00, and ~4.1 means "about four times as long as
 just doing the work right there." So a static helper call costs ~4×, an instance
 method ~5×, an autoload ~6×, a `get_node()` lookup ~10×, and a signal emit with
@@ -197,7 +197,7 @@ Takeaways:
 
 ---
 
-## 3. Loops — three idioms, two of them folklore
+## 3d. Loops — three idioms, two of them folklore
 
 **In plain terms:** three common pieces of loop advice turn out to be wrong, half
 wrong, or backwards once benchmarked. Iterate over a list directly (don't index
@@ -225,7 +225,7 @@ Measured `bench_loop_idiom.gd`, N = 2,000,000, best-of-7, **Godot 4.8.dev**:
 
 ---
 
-## 4. Typed math functions
+## 3e. Typed math functions
 
 **In plain terms:** Godot has two flavors of common math helpers — the generic
 `clamp`/`abs`/`max` that work on anything, and the type-specific `clampf`/`absf`/
@@ -246,7 +246,7 @@ linter can't always tell, so this is **advisory**. Hard rule in
 
 ---
 
-## 5. Static typing & the things that are *not* faster
+## 3f. Static typing & the things that are *not* faster
 
 **In plain terms:** annotating your variables with types (`var x: int = 0` instead
 of `var x = 0`) is the single biggest performance win in GDScript — but it's

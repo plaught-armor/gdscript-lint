@@ -39,7 +39,7 @@ Three things are wrong, and none of them is speed:
   (`HashMap<StringName, Group>`, process-global). It can't mean "alive *in this
   room*" — every room's enemies land in the same bucket. To scope it you mint
   `&"room0_alive"`, `&"room1_alive"` … a namespace you now manage by string
-  convention. That's the autoload-name hazard (Part IV §8): a global identifier
+  convention. That's the autoload-name hazard (4h): a global identifier
   two systems can collide on.
 - **No locality.** `get_nodes_in_group` returns nodes scattered across the tree
   in unspecified order, freshly allocated each call (D2a). There's no contiguous
@@ -78,7 +78,7 @@ func alive_count() -> int: return _alive.size()   # scoped, O(1), no global name
 
 "Alive in room 0" is `room0.alive_count()` — O(1), no tree sweep, no global string,
 no second ledger. The array is contiguous and typed (`Array[Enemy]`), the shape
-§4 (split by access pattern) and §8 (the manager's cached `_alive`) already land
+4d (split by access pattern) and 4g (the manager's cached `_alive`) already land
 on.
 
 The removal is **swap-back**, not `remove_at`: an alive-set is *unordered*
@@ -143,7 +143,7 @@ earns its keep.
 ## Variants & use-cases
 
 - **Save scope.** The owner-held array serializes per-room (`room_state[i].alive`)
-  — a relational `SaveSlot` field (§4). A tree-global group has no natural per-room
+  — a relational `SaveSlot` field (4d). A tree-global group has no natural per-room
   partition to write; you'd reconstruct scope from node paths at save time.
 - **Streaming / unloading.** Free a room subtree and its `_alive` goes with it —
   no dangling group entries to scrub. With one global `&"alive"`, unloading room 0

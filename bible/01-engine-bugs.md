@@ -22,138 +22,15 @@ Draws from [`../rules/engine-bugs.md`](../rules/engine-bugs.md).
 > and in the summary table. The table is the fast-path: if your minimum Godot is
 > past the fix-version, drop the workaround; otherwise keep it. **Re-test on your
 > own target** — "fixed on 4.8.dev" is not a promise about 4.7 or 4.9.
+>
+> **Order:** the full sections below are the bugs **still live on current Godot**.
+> Ones fixed in a known version are condensed under *"Fixed in a known version"*
+> (keep their workaround only if your min Godot predates the fix); the
+> version-status table at the end is the complete verdict.
 
 ---
 
-## 1. `const Packed*Array` reports byte-count size, reads 0.0
-
-**In plain terms:** Godot has special "packed" array types (tight rows of plain
-numbers) that are faster than the general-purpose array. If you mark one as
-`const`, an old bug makes it report its size in *bytes* instead of *elements*,
-and you read zeros back. The fix is simple: don't use `const` for these — use a
-regular `var`.
-
-**Symptom.** A `const`-declared typed `Packed*Array` (or an array of them)
-reports its length as the byte-count of the underlying buffer and yields zeros
-on read. The values you wrote at declaration are gone.
-
-**Repro.**
-
-```gdscript
-# Repro — const Packed*Array reports byte-count size and reads 0.0.
-const TABLE: Array[PackedFloat32Array] = [
-    PackedFloat32Array([1.0, 2.0, 3.0]),
-]
-
-func _ready() -> void:
-    print(TABLE[0].size())  # prints 12 (bytes), not 3
-    print(TABLE[0][0])      # prints 0.0
-```
-
-**Fix.** Never `const` a `Packed*Array` or a typed array of them. Default to
-`var` (instance); promote to `static var` only when the table is genuinely read
-from outside the declaring class — a single-class private "constant" stays
-plain `var`. Initialise with a bare literal; the typed annotation does the
-conversion, and a constructor wrapper is redundant:
-
-```gdscript
-# Good — bare literal; the typed annotation does the conversion.
-var TABLE: PackedInt32Array = [1, 2, 3]
-# Bad — redundant Packed*Array constructor wrapper (S6b).
-var TABLE: PackedInt32Array = PackedInt32Array([1, 2, 3])
-```
-
-Holds for every `Packed*Array` family member: `PackedByteArray`,
-`PackedInt32Array`, `PackedInt64Array`, `PackedFloat32Array`, `PackedFloat64Array`,
-`PackedStringArray`, `PackedVector2Array`, `PackedVector3Array`, `PackedColorArray`.
-
-**Issue / status.** [#88753](https://github.com/godotengine/godot/issues/88753).
-**Re-tested on Godot 4.8.dev: not reproduced.** A `const PackedFloat32Array =
-[1.0, 2.0, 3.0]` now reports `size()==3` and reads `1.0` correctly
-(`repro_typed_collections.gd` → C1). Separately, the nested
-`const Array[PackedFloat32Array] = [PackedFloat32Array([...])]` form from the
-original repro is now itself a **parse error** ("Assigned value … isn't a constant
-expression"), so that shape can't be declared `const` at all. The byte-count
-symptom is gone on 4.8.dev — keep the workaround only if your minimum Godot
-predates the fix. The *style* guidance still stands (init `Packed*` with a bare
-literal, not a constructor wrapper → **S6b**). Lint flag: **C1**.
-
----
-
-## 2. `const` arrays/dicts are shared mutable references
-
-**In plain terms:** marking a list or dictionary as `const` only locks the
-*label*, not the *contents*. Anyone who reaches inside and changes an entry
-changes it for *everyone* using that "constant" — including across scene
-reloads. Treat constant containers as read-only by hand, or copy them before
-editing.
-
-**Symptom.** `const` on an `Array` or `Dictionary` binds the *reference*, not
-the contents. Two callers that mutate the same `const` see each other's writes;
-the mutation outlives the call and survives across scene reloads.
-
-**Repro.**
-
-```gdscript
-# Repro — const Array/Dictionary is a shared mutable reference.
-const TAGS: Array[String] = ["alpha", "beta"]
-
-func a() -> void:
-    TAGS.append("gamma")     # silently mutates the global
-
-func b() -> void:
-    print(TAGS)              # ["alpha", "beta", "gamma"]
-```
-
-**Fix.** Treat `const` containers as read-only by discipline: never mutate;
-`.duplicate()` before any write. For class-shared tables (`static var`),
-enforce read-only at boot — see §3.
-
-**Issue / status.** [#61274](https://github.com/godotengine/godot/issues/61274).
-**Re-tested on Godot 4.8.dev: the silent corruption is gone.** A `const` `Array`
-is now **read-only**: aliasing it (`var a = THE_CONST`) and mutating the alias
-(`a.append(99)`) raises `"Array is in read-only state"` instead of silently
-mutating the shared backing store (`repro_typed_collections.gd` → C2). So the
-engine now enforces what §3's `make_read_only()` used to emulate — the failure is
-loud at the mutation site rather than a corrupt read somewhere downstream. The
-discipline is unchanged (never mutate a `const` container; `.duplicate()` first),
-but on 4.8.dev a violation is caught, not hidden. Lint flag: **C2**.
-
----
-
-## 3. Lock class-shared containers with `.make_read_only()`
-
-**In plain terms:** for tables that *everyone* in the program reads, ask the
-engine to lock them after you finish filling them in. Any later attempt to
-change one will fail loudly with an error, instead of quietly corrupting the
-table for every other reader.
-
-The `static var` form admits the §2 shared-mutability bug. `.make_read_only()`
-is the engine's enforcement layer: subsequent mutations raise `"Array is in
-read-only state"`; reads work; the call is idempotent (`.is_read_only()` to
-guard).
-
-```gdscript
-static var ALL: Array[ItemDef] = [null, preload("res://resources/items/potion.tres"), ...]
-
-func _ready() -> void:
-    _validate()
-    if not ALL.is_read_only():
-        ALL.make_read_only()
-```
-
-**Limit: shallow.** The freeze applies to the top-level container only. Nested
-`Array` / `Dictionary` entries need their own `.make_read_only()` call. And
-`Resource` has no freeze API at all (`Object.set_read_only` is unimplemented)
-— `ALL[1].max_stack = 99` still mutates the singleton preload. At the
-Resource-instance layer, immutability is a code-review convention, not an
-engine guarantee.
-
-**Lint flag: C2a.** No upstream issue — this is the prescribed workaround.
-
----
-
-## 4. Typed `.filter()` / `.map()` return untyped `Array`
+## 1a. Typed `.filter()` / `.map()` return untyped `Array`
 
 **In plain terms:** you'd expect filtering or transforming a typed list to give
 you back a typed list of the same kind. It doesn't — the result is a generic
@@ -205,7 +82,7 @@ flag: **C3**.
 
 ---
 
-## 5. `await` on a freed object leaks or crashes
+## 1b. `await` on a freed object leaks or crashes
 
 **In plain terms:** `await` pauses your function until something happens. While
 you're paused, the object you were waiting on can be deleted. When the code
@@ -216,7 +93,7 @@ the object is still alive right after the `await`.
 fires either leaks the coroutine frame or crashes the resume site. After
 *any* `await` involving a Node, the Node reference may point at a freed
 object — or, worse, at a *different* object that reused the instance id
-(see §6).
+(see C8).
 
 **Repro.**
 
@@ -239,7 +116,7 @@ func chase(target: Node) -> void:
 ```
 
 Belt-and-suspenders: check type too (`if target is Enemy`), because instance
-id reuse may resolve to a live object of a different class (§6).
+id reuse may resolve to a live object of a different class (C8).
 
 **Issue / status.** [#72629](https://github.com/godotengine/godot/issues/72629).
 **By design** — the validity check is the prescribed pattern. **Confirmed on Godot
@@ -250,7 +127,7 @@ flag: **C5**.
 
 ---
 
-## 6. Freed-object instance-id reuse
+## 1c. Freed-object instance-id reuse
 
 **In plain terms:** every object gets a numeric tag. When you delete an object
 the engine can hand that same tag to a *different* new object. If you held the
@@ -304,7 +181,7 @@ this rule is about refs that *escape* a subtree's lifecycle.
 
 ---
 
-## 7. RefCounted circular references leak silently
+## 1d. RefCounted circular references leak silently
 
 **In plain terms:** these objects clean themselves up when nothing points at
 them anymore. If two of them point at each other, each one is keeping the
@@ -343,7 +220,7 @@ func link(a: Node_, b: Node_) -> void:
    ```
 
 2. **Entity IDs** — store `get_instance_id()` on one side, resolve at use
-   site. Same shape as §6. See [`../rules/dod.md`](../rules/dod.md) D3.
+   site. Same shape as C8. See [`../rules/dod.md`](../rules/dod.md) D3.
 
 **Issue / status.** [#7038](https://github.com/godotengine/godot/issues/7038).
 **Live — confirmed on Godot 4.8.dev.** Creating 2000 mutually-referencing
@@ -354,7 +231,7 @@ one direction with `weakref()` or an integer id. Lint flag: **C7**.
 
 ---
 
-## 8. `sort_custom` must be strict `<`
+## 1e. `sort_custom` must be strict `<`
 
 **In plain terms:** when you write a custom sort, your comparison function must
 say "strictly less than" — never "less than or equal." Otherwise the sort can
@@ -394,7 +271,7 @@ behaviour are unchanged). Lint flag: **C11**.
 
 ---
 
-## 9. `assert()` is stripped in release
+## 1f. `assert()` is stripped in release
 
 **In plain terms:** `assert()` is a developer-only check — when you build the
 final shipped game, the whole line is *deleted*. If you tucked any real work
@@ -436,7 +313,7 @@ flag: **C12**.
 
 ---
 
-## 10. `.tres ↔ .tscn` preload cycles
+## 1g. `.tres ↔ .tscn` preload cycles
 
 **In plain terms:** if a data file points at a scene file and that scene file
 points back at the same data file, the engine gets stuck trying to load both
@@ -490,32 +367,42 @@ convention-derived path, never a `PackedScene` ext_resource on a `.tres` the
 
 ---
 
-## 11. Further criticals — condensed
+## 1h. Lock class-shared containers with `.make_read_only()`
 
-**In plain terms:** a short list of more bugs that follow the same shape as the
-ones above — each one a brief note on what it is, whether it's fixed, and what
-to do until it is.
+**In plain terms:** for tables that *everyone* in the program reads, ask the
+engine to lock them after you finish filling them in. Any later attempt to
+change one will fail loudly with an error, instead of quietly corrupting the
+table for every other reader.
 
-The rules file carries a tail of additional criticals worth knowing about
-but with shorter repros:
+The `static var` form admits the C2 shared-mutability bug. `.make_read_only()`
+is the engine's enforcement layer: subsequent mutations raise `"Array is in
+read-only state"`; reads work; the call is idempotent (`.is_read_only()` to
+guard).
 
-- **C4** — `Array[Base]` covariance under `Array[Derived]` assignment.
-  [#83876](https://github.com/godotengine/godot/issues/83876). *4.8.dev: typed
-  arrays are **invariant**. A direct `var b: Array[Base] = derived_arr` is a
-  **compile error** ("Cannot assign a value of type Array[Der] to … Array[Base]"),
-  so the failure is loud at parse time, not a silent bug. Element covariance works
-  (`Array[Base].append(Der)`), and `.assign()` does a checked element-wise copy —
-  that's the conversion path (`repro_c4_covariance.gd`).*
-- **C6** — coroutine resumed after `queue_free`. Fixed ~4.7.
-  [#93608](https://github.com/godotengine/godot/issues/93608). *4.8.dev: the crash
-  is gone, but the coroutine is **silently dropped** — it does NOT resume to
-  completion. The repro proves this by writing to a `RefCounted` the caller still
-  holds: `resumed` stays `false` (`tests/repro_async_proj/`). So "fixed" means "no
-  longer crashes," not "runs to the end" — don't rely on a coroutine finishing if
-  its owning node may be freed mid-`await`.*
-- **C10** — `super()` in `_init` skipped. Fixed in 4.2.
-  [#76938](https://github.com/godotengine/godot/issues/76938). *4.8.dev: confirmed
-  fixed — `super()` runs the base ctor (`repro_lifecycle.gd` → C10).*
+```gdscript
+static var ALL: Array[ItemDef] = [null, preload("res://resources/items/potion.tres"), ...]
+
+func _ready() -> void:
+    _validate()
+    if not ALL.is_read_only():
+        ALL.make_read_only()
+```
+
+**Limit: shallow.** The freeze applies to the top-level container only. Nested
+`Array` / `Dictionary` entries need their own `.make_read_only()` call. And
+`Resource` has no freeze API at all (`Object.set_read_only` is unimplemented)
+— `ALL[1].max_stack = 99` still mutates the singleton preload. At the
+Resource-instance layer, immutability is a code-review convention, not an
+engine guarantee.
+
+**Lint flag: C2a.** No upstream issue — this is the prescribed workaround.
+
+---
+
+## Further live criticals — condensed
+
+Live on 4.8.dev, shorter repros:
+
 - **C13** — `Node.new()` without a parent leaks; pair every bare `.new()`
   with an owner or `queue_free`. No issue number — pattern, not a bug. *4.8.dev:
   confirmed — 2000 unparented `Node.new()` with refs dropped leaked exactly 2000
@@ -538,6 +425,38 @@ but with shorter repros:
 
 ---
 
+---
+## Fixed in a known version — drop the workaround past your min Godot
+
+These reproduced on an older Godot but are fixed in the version noted. Keep the
+workaround only if your project's minimum predates the fix; otherwise drop it.
+The full re-test verdicts are in the version-status table below.
+
+- **C1** — `const Packed*Array` reported byte-count size and read 0.0. [#88753](https://github.com/godotengine/godot/issues/88753). **Not reproduced on 4.8.dev** (size correct; the nested-constructor form is now a parse error). Use `var`/`static var`, never `const`, if your min Godot predates the fix; the S6b style point — init a `Packed*Array` with a bare literal, not a constructor wrapper — holds regardless.
+- **C2** — `const` `Array`/`Dictionary` was a shared mutable reference. [#61274](https://github.com/godotengine/godot/issues/61274). **Fixed on 4.8.dev** — a `const` container is now read-only; mutating it raises instead of silently corrupting the shared store. Discipline unchanged: never mutate a `const` container, `.duplicate()` first. (For class-shared `static var` tables the `.make_read_only()` lock — C2a above — is the live enforcement.)
+- **C4** — `Array[Base]` covariance under `Array[Derived]` assignment.
+  [#83876](https://github.com/godotengine/godot/issues/83876). *4.8.dev: typed
+  arrays are **invariant**. A direct `var b: Array[Base] = derived_arr` is a
+  **compile error** ("Cannot assign a value of type Array[Der] to … Array[Base]"),
+  so the failure is loud at parse time, not a silent bug. Element covariance works
+  (`Array[Base].append(Der)`), and `.assign()` does a checked element-wise copy —
+  that's the conversion path (`repro_c4_covariance.gd`).*
+- **C6** — coroutine resumed after `queue_free`. Fixed ~4.7.
+  [#93608](https://github.com/godotengine/godot/issues/93608). *4.8.dev: the crash
+  is gone, but the coroutine is **silently dropped** — it does NOT resume to
+  completion. The repro proves this by writing to a `RefCounted` the caller still
+  holds: `resumed` stays `false` (`tests/repro_async_proj/`). So "fixed" means "no
+  longer crashes," not "runs to the end" — don't rely on a coroutine finishing if
+  its owning node may be freed mid-`await`.*
+- **C10** — `super()` in `_init` skipped. Fixed in 4.2.
+  [#76938](https://github.com/godotengine/godot/issues/76938). *4.8.dev: confirmed
+  fixed — `super()` runs the base ctor (`repro_lifecycle.gd` → C10).*
+- **H8** — freed-Node truthiness / `== null` lied. [#59816](https://github.com/godotengine/godot/issues/59816). **Fixed 4.4** (≤4.3 still lie). `is_instance_valid(freed)` is `false` — use it as belt-and-suspenders on 4.4+ (S9).
+- **H12** — `@export var` of a Resource type defaulted to `null` on load. [#110394](https://github.com/godotengine/godot/issues/110394). **Fixed 4.6.** A boot validator that errors on a still-null `@export` stays the right discipline.
+- **M9** — `Resource.duplicate(true)` skipped nested `Array`s. [#74918](https://github.com/godotengine/godot/issues/74918). **Fixed 4.5** via `duplicate_deep()`.
+- **P9** — Lua-style `d.key` dict access was ~2× slower than `d["key"]`. [#68834](https://github.com/godotengine/godot/issues/68834). **Fixed 4.4** — gap closed (1.01×); bracket access still preferred for type-clarity.
+
+---
 ## Version-status summary
 
 **In plain terms:** a one-glance table. Find the bug, check whether the Godot
