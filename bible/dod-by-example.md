@@ -148,6 +148,27 @@ The `_slot_of` fix-up is the load-bearing detail: swap-back reshuffles slots, so
 the id→slot map is updated for the entity that moved. That's what keeps **D3**
 working across a kill.
 
+`kill(slot)` is the right tool for **one** removal. For a **mass** removal — an
+AoE drops a dozen at once — repeated swap-back loses to a single **write-cursor
+compaction** ([removing dead entities](removing-dead-entities.md), measured). The
+manager carries both; `cull()` packs survivors down in one pass and keeps order:
+
+```gdscript
+func cull() -> int:                       # remove every slot with health <= 0
+	var n: int = _id.size()
+	var w: int = 0                        # write cursor
+	for r: int in n:                      # read cursor — each slot touched once
+		if _health[r] > 0:
+			if w != r:
+				_id[w] = _id[r]; _kind[w] = _kind[r]
+				_health[w] = _health[r]; _pos_x[w] = _pos_x[r]
+			_slot_of[_id[w]] = w; w += 1
+		else:
+			_slot_of.erase(_id[r])
+	_id.resize(w); _kind.resize(w); _health.resize(w); _pos_x.resize(w)
+	return n - w                          # how many were removed
+```
+
 ### Behavior as a pure transform, dispatch as a table (D6, D7)
 
 `CombatSystem` never instantiates. `resolve()` is a static function that takes
@@ -190,20 +211,21 @@ func tick(dt: float) -> void:
 
 ## The frame, traced
 
-What happens when `main.gd` runs one wave:
+What `main.gd` runs (six enemies, two removal phases):
 
-1. **Spawn** four enemies → four appends to each parallel array; `_slot_of` maps
-   each new id to its slot. No `Node3D`, no scene instance.
-2. **Tick ×3** → one `for` loop per tick advances every `_pos_x` toward 0 at the
-   kind's speed. Grunt#1 at speed 1.0 over 3×0.5 s moves 10.0 → 8.5.
-3. **Attack each by id** → `slot_of(id)` resolves the live slot; `CombatSystem.resolve`
-   looks up the armor multiplier and subtracts. The brute's HEAVY armor (×0.4)
-   turns an 8-damage crit (×2) into 6, so it survives on 34; the unarmored grunts
-   and the light skirmisher die.
-4. **Kill the lethal** → swap-back removes their slots. When the *last* slot
-   (grunt#4) is moved into a hole, its id→slot entry updates.
-5. **Resolve ids again** → the brute, originally spawned third, now reports
-   `alive @slot 0` because swap-back moved it there. The id still finds it.
+1. **Spawn** six enemies → appends to each parallel array; `_slot_of` maps id →
+   slot. No `Node3D`, no scene instance.
+2. **Tick ×3** → one `for` loop per tick advances every `_pos_x` toward 0.
+3. **Phase 1 — single removals.** Snipe the two skirmishers; each lethal hit is a
+   `kill(slot)` **swap-back** (O(1), one removal). The last slot fills the hole and
+   its id→slot entry updates.
+4. **Phase 2 — mass removal.** A flat AoE blasts the survivors; the two grunts
+   drop, the brutes (40 hp) live. One `cull()` **write-cursor compaction** packs
+   the survivors down in a single pass — *not* two more swap-backs — and keeps
+   their relative order.
+5. **Resolve ids again** → survivors still resolve through the reshuffle: the brute
+   spawned last reports `alive @slot 0`, the one spawned third `@slot 1` (order
+   preserved by the compaction). D3 holds across both swap-back and cull.
 
 ## Verified output
 
@@ -211,23 +233,25 @@ A literal run (`godot --headless --path tests/example_dod_combat_proj`, after a
 one-time `--import`):
 
 ```
-[demo] spawned 4 enemies (one batch, no per-node _process)
-[demo] after 3 ticks, grunt#1 x=8.50 (started 10.0, speed 1.0)
-[demo] hit id=1 (grunt): hp now -6 — LETHAL, swap-back removed
-[demo] hit id=2 (brute): hp now 34
-[demo] hit id=3 (skirmisher): hp now -5 — LETHAL, swap-back removed
-[demo] hit id=4 (grunt): hp now -6 — LETHAL, swap-back removed
-[demo] survivors: 1
+[demo] spawned 6 enemies
+[demo] phase 1 — single swap-back kills:
+[demo]   sniped id=1 lethal=true
+[demo]   sniped id=5 lethal=true
+[demo]   survivors: 4
+[demo] phase 2 — AoE then one cull() compaction:
+[demo]   AoE 12; cull() removed 2 in one pass, 4 -> 2
 [demo]   id=1 -> dead
-[demo]   id=2 -> alive @slot 0
-[demo]   id=3 -> dead
+[demo]   id=2 -> dead
+[demo]   id=3 -> alive @slot 1
 [demo]   id=4 -> dead
+[demo]   id=5 -> dead
+[demo]   id=6 -> alive @slot 0
 ```
 
-Every line is a rule paying off: the batch tick (line 2), the armor table making
-the brute eat 6 where the grunt ate 16 (lines 3–4), swap-back death (the
-`removed` tags), and — the subtle one — **id 2 surviving as `slot 0`** after the
-reshuffle (D3 holding across P6).
+Every line is a rule paying off: single-removal **swap-back** in phase 1, a single
+**compaction** pass for the mass cull in phase 2 (the measured-faster choice for a
+subset), and — the subtle one — **ids 3 and 6 still resolving** to their packed
+slots after the compaction reshuffled them (D3 holding across the cull).
 
 ## What each rule bought, concretely
 
@@ -238,9 +262,9 @@ reshuffle (D3 holding across P6).
 | D3 | `_attacker: Node` (dangles) | attacker/entity **id** | freed source resolves to -1, never a wrong object |
 | D4 | 30 fields in one object | parallel arrays by access pattern | each system walks only its array |
 | D6 | `take_damage()` on the data | `CombatSystem.resolve()` | damage math tested with no SceneTree |
-| D7 | armor `if/elif` chain | `ARMOR_MULT` table | new armor = new row, not new code |
+| D7 | armor `if/elif` chain | `armor_mult` table | new armor = new row, not new code |
 | D8 | N self-ticking `_physics_process` | one manager `for` | one loop, no per-node dispatch |
-| P6 | (n/a — list-shaped) | swap-back `kill()` | O(1) death, not an O(n) shift |
+| P6 | (n/a — list-shaped) | swap-back `kill()` (single) + write-cursor `cull()` (mass) | O(1) single removal; one-pass compaction for a subset cull, order kept |
 
 ## Run it
 

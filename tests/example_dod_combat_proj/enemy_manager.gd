@@ -10,8 +10,9 @@ extends RefCounted
 ##      instances of that kind — not copied onto every slot.
 ## D2 — existence-based: a slot's PRESENCE in the arrays *is* "alive". There is no
 ##      _dead bool; death is removal. is-alive == has-a-slot.
-## P6 — death removes via swap-back (overwrite the dead slot with the last one,
-##      then shrink): O(1), order-agnostic, no O(n) shift.
+## P6 — two ways the dead leave (bible/removing-dead-entities.md): kill(slot) is
+##      swap-back (O(1), one removal); cull() is write-cursor compaction (one pass,
+##      keeps order, for mass removal). Measured: compaction wins a subset cull.
 ## D8 — one tick() loops every slot once. Entities do not self-process; the
 ##      manager owns the loop.
 ## D3 — a stable id->slot map lets other systems hold an integer id across the
@@ -89,3 +90,29 @@ func kill(slot: int) -> void:
 	_health.resize(last)
 	_pos_x.resize(last)
 	_slot_of.erase(dead_id)
+
+
+# Mass cull — write-cursor compaction across every SoA array in one pass, keeping
+# order, one resize at the end. Use this to drop MANY dead at once (e.g. after an
+# AoE); kill(slot) above stays for a single known removal. Measured faster than
+# repeated swap-back for a subset cull (bible/removing-dead-entities.md). Removes
+# every slot with health <= 0; returns how many were removed.
+func cull() -> int:
+	var n: int = _id.size()
+	var w: int = 0 # write cursor
+	for r: int in n: # read cursor — touch each slot exactly once
+		if _health[r] > 0:
+			if w != r:
+				_id[w] = _id[r]
+				_kind[w] = _kind[r]
+				_health[w] = _health[r]
+				_pos_x[w] = _pos_x[r]
+			_slot_of[_id[w]] = w # survivor's id now points at its packed slot
+			w += 1
+		else:
+			_slot_of.erase(_id[r]) # dead: drop the id->slot entry
+	_id.resize(w)
+	_kind.resize(w)
+	_health.resize(w)
+	_pos_x.resize(w)
+	return n - w
