@@ -5,24 +5,130 @@ state as container membership, references by ID, schema by access pattern.
 
 Draws from [`../rules/dod.md`](../rules/dod.md).
 
-This part is about **shape**, not speed. Where a design choice happens to be
-faster — and it often does — Part III already has the numbers; this chapter
-cross-links rather than re-runs them. The argument here is correctness,
-testability, and not painting yourself into a corner. Mike Acton's framing
-applies cleanly to GDScript:
+---
 
-1. **Code is not more important than data.** Data shape decides what code is
-   possible and what it costs. Pick the data shape first.
+## The case for DOD (even in GDScript)
+
+Before the rules, the argument for following them. The claim: **default to
+data-oriented design in Godot — not because it's fast (in GDScript the speed win
+is real but muted), but because it's the cheapest path to correct, testable,
+engine-aligned code, and because it's where the engine pushes you anyway the
+moment you scale.**
+
+### The default instinct is the expensive one
+
+Open a blank script and the reflex is to model the noun: `class Enemy` with
+health, position, an AI state, an inventory, a `take_damage()`, a `_die()`. One
+class, one rocket. Mike Acton's framing of why that's the wrong reflex still
+lands ([CppCon 2014](https://www.youtube.com/watch?v=rX0ItVEVjHc)) — the three
+lies:
+
+1. **Software is not a platform.** Cache lines, Variant dispatch, bytecode are
+   real; Big-O ignores the constants that dominate a frame budget.
 2. **Code does not model the world.** Don't write a `Rocket` class because the
    game has rockets. Write the transform `(N rockets, dt) → new positions` —
    that's the program; the class is a coincidence.
-3. **Software is not a platform.** Cache lines, Variant dispatch, bytecode are
-   real. Big-O ignores the constants that dominate a frame budget.
+3. **Code is not more important than data.** The data shape decides what code is
+   possible and what it costs. Pick the data shape first.
 
-Concretely: separate **data** (POD) from **behavior** (pure transforms on
-collections). Encode optional state by **container membership**, not flags.
-Cross-system references go by **integer ID**, not pointer. Split data **by
-access pattern**, not by domain object. And use the cheapest dispatch that fits.
+The `Enemy` class is all three at once — it models a world-noun, treats the
+SceneTree as a free platform, and decides the shape of the data (30 fields, one
+object, touched by five systems) as an afterthought of the code. DOD inverts the
+order: data first, code as the transform `(input data) → (output data)`.
+
+### Concede the cache argument up front — then watch it not matter
+
+The honest objection first, because pretending it away is how you lose the
+argument: **DOD's headline win is cache locality, and GDScript barely has it.**
+The interpreter boxes everything in Variants; the engine's own proposal admits
+"classes are not lightweight… memory is all over the place so there is not much
+cache locality"
+([#7329](https://github.com/godotengine/godot-proposals/issues/7329)). The
+struct-of-arrays cache magic that makes C++ DOD a 10× win lives in Godot's C++
+servers, not your `.gd` files.
+
+So if the *only* argument for DOD were raw speed, you could fairly shrug in
+GDScript. It isn't. The cache win is the least portable reason. Four survive the
+trip into a managed language — three of them not about speed at all.
+
+**1. It's the cheapest correctness, at zero entities.** The argument that doesn't
+depend on scale, profiling, or the interpreter — DOD eliminates whole *bug
+classes* by construction. Existence-based processing (**D2**) makes state
+membership in a container, not a flag on every object: no flag to desync from
+reality, because the flag *is* reality. Reference by integer ID (**D3**) returns
+a live object or `null`, never a wrong-type live one — the freed-id-reuse crash
+([#32383](https://github.com/godotengine/godot/issues/32383), Part I **C8**)
+can't happen. Pure transforms (**D6**) test with two plain objects and no
+SceneTree. A turn-based card game with nine entities gets every one of these.
+DOD is correct-by-construction *before* it is fast — lead with this, it's the
+claim with no counter-benchmark.
+
+**2. The structural speed wins survive the interpreter.** Not the cache win — the
+*structural* one, measured on this build (Part III): `Packed*Array` over
+`Array[primitive]` (contiguous, no per-element Variant box — `S6`); one batched
+manager loop over N per-node `_process` calls (a 5,000-node repro ran **14×
+slower** self-processing, 93% of CPU in per-node `StringName` dispatch,
+[#98175](https://github.com/godotengine/godot/issues/98175); **D8**); HashMap-
+backed groups so existence-based processing is *also* the fast shape (**D2a**).
+Interpreter-proof because they're about how many Variant ops happen, not cache
+lines.
+
+**3. Godot itself is data-oriented under the hood — you're following it, not
+fighting it.** RenderingServer / PhysicsServer / NavigationServer operate on flat
+RID handles and batched arrays; "the whole scene system is *optional*" and built
+on top of them
+([using_servers](https://docs.godotengine.org/en/stable/tutorials/performance/using_servers.html)).
+The engine lead, *defending* the OOP scene tree, concedes the optimization lives
+in the data-oriented layer
+([why-isnt-godot-ecs](https://godotengine.org/article/why-isnt-godot-ecs-based-game-engine/)).
+A manager owning a `PackedVector3Array` of positions does one layer up exactly
+what the engine does one layer down. Alignment, not rebellion.
+
+**4. You end up here anyway — so start here.** Part VII's escalation ladder is a
+DOD on-ramp: scene tree → batched manager → `MultiMesh` → servers-direct, each
+rung more data-oriented than the last (servers-direct holds 1M instances at
+~160 FPS where per-node died in the thousands,
+[ezcha](https://ezcha.net/news/5-16-26-rendering-a-million-objects-in-godot)). If
+scale forces you there, thinking in data from the start makes the climb a
+refactor of degree, not a rewrite of paradigm. Retrofitting DOD onto a graph of
+fat `Enemy` objects is the expensive version.
+
+### The "premature optimization" objection, answered
+
+The reflexive Knuth rebuttal doesn't apply, twice over. First, **DOD is
+architecture, not optimization** — Knuth's "critical 3%" is hand-tuning a hot
+loop; DOD is about *which loops are possible*, and Godot's own docs draw the line:
+"performant software results from performant design decisions made at the
+architectural stage, before coding begins"
+([general_optimization](https://docs.godotengine.org/en/stable/tutorials/performance/general_optimization.html)).
+Second, **adoption cost ≈ zero, retrofit cost is high** — a group instead of a
+bool, an ID instead of a pointer, a transform instead of a method are the same
+line count to write; the desync bug, the stale-pointer crash, and the untestable
+method are expensive to undo. You're declining debt, not buying speculation.
+
+### The one concession that keeps this honest
+
+DOD has a real failure mode, flagged as hard as the rest is advocated: **don't
+normalize speculatively.** No ID-indirection for a reference that never leaves
+its own subtree (a parent-owned child is a direct typed ref). No splitting one
+class into five containers before a second system needs the data. No ECS-ifying
+code that runs once. Three similar lines beats a premature abstraction; measure
+dispatch before optimizing it (the closing rules of this part). DOD is a default
+for *shape*, not a license to over-engineer — and that concession is what makes
+the rest credible.
+
+**The ask, in one line:** model the transform on N things not the thing; encode
+state as membership; reference by ID across boundaries; keep behavior in pure
+transforms — and you get correctness for free, speed where the interpreter still
+allows it, and alignment with the engine's substrate, at no extra cost to write
+and large savings not to retrofit. The cache win is a bonus you mostly collect in
+C++; the rest you collect in GDScript today, at nine entities or nine thousand.
+
+The rest of this part is those four moves as concrete rules: separate **data**
+(POD) from **behavior** (pure transforms on collections); encode optional state
+by **container membership**, not flags; cross-system references by **integer
+ID**, not pointer; split data **by access pattern**, not domain object; cheapest
+dispatch that fits.
 
 ---
 
