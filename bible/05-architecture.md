@@ -106,6 +106,17 @@ a matching `class_name` collides — Godot errors `Class 'Foo' hides an autoload
 singleton`. So `SoundBus` / `SaveSystem` / `RegistryRoot` are bare `extends Node`,
 accessed by their autoload name (`SaveSystem.write_slot(...)`).
 
+**4.8.dev: confirmed, and it's fatal** (`tests/repro_autoload_classname_proj/`).
+A script registered as autoload `Foo` that also declares `class_name Foo` fails to
+parse — exact message `Parse Error: Class "Foo" hides an autoload singleton.` —
+and because the script then won't load, the autoload itself doesn't instantiate
+(`Failed to instantiate an autoload, script ... does not inherit from 'Node'`).
+**In plain terms:** the autoload name and a `class_name` are two ways of declaring
+the same global name, and you can't declare it twice — naming both `Foo` is like
+two `var Foo` at global scope, so the engine rejects the file outright rather than
+silently picking one. Pick one spelling: drop the `class_name` (the default), or
+give it a different one (`class_name SaveSystemNode` + autoload `SaveSystem`).
+
 Trade-off: the autoload name is **not** usable as a type annotation
 (`var s: SaveSystem` fails) — fine for a singleton, since you never hold a
 reference *to* the singleton, you call methods on it directly. If you genuinely

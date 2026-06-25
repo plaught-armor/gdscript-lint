@@ -84,6 +84,7 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `repro_h9_proj/` | II (H9) | `@onready` init bypasses the var's setter (#71372) — needs a scene |
 | `bench_param_types.gd` | II (H4/H10b) | typed vs untyped signal param, typed vs untyped Dict param (both ~wash) |
 | `repro_cache_proj/` | VI (cache) | dedup-by-path, `has_cached`, CACHE_MODE_REUSE/IGNORE, last-ref-drop frees, `duplicate()` shallow — needs a project |
+| `repro_autoload_classname_proj/` | V (A6) | `class_name` matching an autoload name → fatal "hides an autoload singleton" — needs a project |
 
 The two `repro_*` scripts are how the Part I version-status table's "Re-tested
 4.8.dev" column was filled — re-run them on your own target before trusting any
