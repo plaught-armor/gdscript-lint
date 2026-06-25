@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="CycRes" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://cyc_res.gd" id="1"]
+[ext_resource type="PackedScene" path="res://thing.tscn" id="2"]
+
+[resource]
+script = ExtResource("1")
+label = "cyc-res"
+scene = ExtResource("2")

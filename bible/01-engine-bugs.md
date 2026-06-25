@@ -10,8 +10,9 @@ Draws from [`../rules/engine-bugs.md`](../rules/engine-bugs.md).
 > Godot 4.8.dev** (`custom_build.fd98f8452`) with the repro scripts in
 > [`../tests/`](../tests/) (`repro_typed_collections.gd`, `repro_lifecycle.gd`).
 > The engine moves: re-running the repros found that **C1, C2, and the `.filter()`
-> half of C3 no longer reproduce on 4.8.dev**, while C3's `.map()` half, C7, and
-> C14 are still live. Where a re-test changed the verdict it's called out inline
+> half of C3 no longer reproduce on 4.8.dev**, while C3's `.map()` half, C7, C14,
+> and C17 are still live (C17 now as a silent partial-load rather than a hang).
+> Where a re-test changed the verdict it's called out inline
 > and in the summary table. The table is the fast-path: if your minimum Godot is
 > past the fix-version, drop the workaround; otherwise keep it. **Re-test on your
 > own target** — "fixed on 4.8.dev" is not a promise about 4.7 or 4.9.
@@ -390,8 +391,17 @@ parallel "scenes" registry mirroring the data registry is a coupling smell,
 not a split.
 
 **Issue / status.** [#98551](https://github.com/godotengine/godot/issues/98551).
-Script-level form fixed in 4.3; **resource-level form still live**.
-Lint flag: **C17**.
+Script-level form fixed in 4.3; **resource-level form still live**. **Re-tested on
+Godot 4.8.dev** (`tests/repro_cycle_proj/`): a real `thing.tres → thing.tscn →
+thing.tres` cycle does **not deadlock** (the 4.3 fix prevents the hang), but it
+still **partial-loads** — loading `thing.tres` resolves its `scene`, yet
+instantiating that scene yields a `def` back-reference of `null`, and the loader
+logs `[ext_resource] referenced non-existent resource at: res://thing.tres` while
+resolving the cycle. So the failure mode on 4.8.dev is a *silent null field* (and a
+log error), not a freeze — which is arguably worse, because it sails past a quick
+smoke test. The fix is unchanged: keep `.tres` a leaf — carry the inverse edge as a
+convention-derived path, never a `PackedScene` ext_resource on a `.tres` the
+`.tscn` already references. Lint flag: **C17**.
 
 ---
 
@@ -456,7 +466,7 @@ disagree, trust the empirical column **for that build only**.
 | C14 | `range(n)` typed as `Array[int]` | [#110659](https://github.com/godotengine/godot/issues/110659) | **Live** | **Live** — `range()` element type is untyped |
 | C15 | typed Dict + `Packed*` value | [#116947](https://github.com/godotengine/godot/issues/116947) | **Live** (dup of #88753) | — (C1 fixed → re-check on target) |
 | C16 | `static var` inheritance | [#87629](https://github.com/godotengine/godot/issues/87629) | **Live** | Observed: subclass shares the base's `static var` |
-| C17 | `.tres ↔ .tscn` preload cycle | [#98551](https://github.com/godotengine/godot/issues/98551) | **Live** (script-level fixed 4.3) | — (needs project resources) |
+| C17 | `.tres ↔ .tscn` preload cycle | [#98551](https://github.com/godotengine/godot/issues/98551) | **Live** (script-level fixed 4.3) | **Live** — no hang, but partial-load: back-ref null + ext_resource error |
 | H8 | freed-Node truthiness lies | [#59816](https://github.com/godotengine/godot/issues/59816) | **Fixed 4.4** (≤4.3 still lie) | **Confirmed fixed** — `is_instance_valid(freed)`=false |
 | H12 | `@export` Resource null on load | [#110394](https://github.com/godotengine/godot/issues/110394) | **Fixed 4.6** | — |
 | M9 | `Resource.duplicate(true)` skips Array | [#74918](https://github.com/godotengine/godot/issues/74918) | **Fixed 4.5** via `duplicate_deep()` | **Confirmed fixed** — deep-dup, original unaffected |

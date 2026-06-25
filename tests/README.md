@@ -71,6 +71,7 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `autoload_bench_proj/` | III §2 | autoload global-ident call (needs a real project) |
 | `repro_typed_collections.gd` | I (C1/C2/C3/C14/C16) | re-tests const/typed-collection bug status on this build |
 | `repro_lifecycle.gd` | I (C7/C8/C10/H8/M9/C11/C2a + C3.map) | re-tests object-lifecycle bug status |
+| `repro_cycle_proj/` | I (C17) | real `.tres ↔ .tscn` ext_resource cycle — needs a project |
 
 The two `repro_*` scripts are how the Part I version-status table's "Re-tested
 4.8.dev" column was filled — re-run them on your own target before trusting any
