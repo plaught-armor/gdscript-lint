@@ -47,6 +47,14 @@ cache locality"
 struct-of-arrays cache magic that makes C++ DOD a 10× win lives in Godot's C++
 servers, not your `.gd` files.
 
+**In plain terms:** DOD's famous speed comes from packing data tightly so the CPU
+can read it in long, predictable runs (that's "cache locality"). GDScript wraps
+every value in a generic box (a "Variant") and scatters objects around memory, so
+that tight-packing trick mostly doesn't apply to your script code — the engine
+already uses it down in its C++ rendering/physics layer, where you can't. So the
+speed headline is weak in GDScript. The point of what follows: the *other*
+reasons hold anyway.
+
 So if the *only* argument for DOD were raw speed, you could fairly shrug in
 GDScript. It isn't. The cache win is the least portable reason. Four survive the
 trip into a managed language — three of them not about speed at all.
@@ -75,7 +83,8 @@ lines.
 
 **3. Godot itself is data-oriented under the hood — you're following it, not
 fighting it.** RenderingServer / PhysicsServer / NavigationServer operate on flat
-RID handles and batched arrays; "the whole scene system is *optional*" and built
+RID handles (an RID is just an integer ticket for a thing the server owns, not a
+Node object) and batched arrays; "the whole scene system is *optional*" and built
 on top of them
 ([using_servers](https://docs.godotengine.org/en/stable/tutorials/performance/using_servers.html)).
 The engine lead, *defending* the OOP scene tree, concedes the optimization lives
