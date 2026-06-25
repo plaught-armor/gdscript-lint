@@ -1,0 +1,8 @@
+config_version=5
+
+[application]
+config/name="static_init_repro"
+run/main_scene="res://checker.tscn"
+
+[autoload]
+RegistryRoot="*res://registry_root.gd"

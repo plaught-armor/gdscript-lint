@@ -220,13 +220,40 @@ Three things this shape locks in:
   as a field. The parity-asserting test that would otherwise guard the two
   arrays' length-alignment is the giveaway.
 
-`_static_init` runs the first time the class is referenced. `RegistryRoot._ready`
-references each registry once (e.g. `var _ := ItemRegistry.ALL.size()`) to force
-the static-init order at boot — predictable, fail-loud, no `validate()` API on
-the registry itself. The crash-on-validation-failure path is intentional: a
+`RegistryRoot` references each registry once (e.g. `var _ := ItemRegistry.ALL.size()`)
+so each registry validates at boot, fail-loud, with no `validate()` API on the
+registry itself. The crash-on-validation-failure path is intentional: a
 half-loaded registry that silently returns `null` for a missing item is the
 worst possible failure mode, because it surfaces as "potion doesn't heal" at
 3am, not "registry boot failed" at startup.
+
+**Measured (4.8.dev, `tests/repro_static_init_proj/`) — `_static_init` timing is
+subtler than "runs the first time the class is referenced":** it runs when the
+class's script is first *loaded*, and a script's `class_name` dependencies are
+loaded when *that* script loads — not when a reference statement later executes.
+The trace nails three things down:
+
+- **It fires at script-load, ahead of `_ready`.** A registry named only inside
+  `RegistryRoot._ready`'s *body* still runs its `_static_init` **before**
+  `RegistryRoot._ready` executes — because loading the autoload script
+  `registry_root.gd` resolves `ItemRegistry` / `EnemyRegistry` as load-time
+  dependencies. Both `[static_init]` lines print above `[RR] _ready START`.
+- **Reachable, not eager-for-all.** A `class_name`'d registry that *no* loaded
+  script references (`UnusedRegistry` in the repro) never runs `_static_init` at
+  all. So it's not "every `class_name` class inits at boot" — it's "every
+  `class_name` class **reachable from a loaded script** inits."
+- **Once, sentinel, lock.** `_static_init` runs exactly once (a later
+  re-reference produced no second run), `ALL[0]` (the `NONE` sentinel) is `null`,
+  and `make_read_only()` set inside `_static_init` leaves `is_read_only() == true`.
+
+The practical correction: `RegistryRoot`'s job is **reachability**, not "forcing
+init from inside `_ready`." By statically naming each registry from a script that
+loads at boot, it guarantees they load (and validate) at boot at all. The
+*timing* is script-load, before `_ready`; the statement order inside `_ready`
+does **not** control static-init order — load-dependency order does (first
+lexical reference within the loaded script). If you need a registry to init at
+boot, the load-bearing requirement is that *some boot-loaded script names it* —
+the `_ready` body is just a convenient, guaranteed-reachable place to do so.
 
 ### 4b. Manager (batched-tick, D8)
 
@@ -378,6 +405,16 @@ registry, the crash fires before any gameplay code runs.
 `push_error` alone is not enough — Godot prints to stderr and keeps going,
 which is exactly what you don't want at boot. `OS.crash` after `push_error` is
 the pair: the error gives you the diagnostic, the crash stops the bleed.
+
+One measured caveat on *when* this fires (full repro in §4a): a registry's
+`_static_init` validation runs at the **load** of the first boot-loaded script
+that names it, which is **before** `RegistryRoot._ready` executes — not at the
+`_ready` reference statement. So the crash, if a `.tres` is missing, can fire
+during autoload script loading, ahead of `RegistryRoot._ready` ever running.
+The order registries validate in follows load-dependency order, not the order
+of statements in `_ready`. What `RegistryRoot` guarantees is **reachability** —
+that each registry is named by a boot-loaded script at all — which is the real
+precondition for boot-time validation. See `tests/repro_static_init_proj/`.
 
 ---
 

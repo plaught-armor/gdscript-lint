@@ -1,3 +1,7 @@
+# Godot per-project generated caches (class registry, imports, editor state).
+# Repro projects under tests/ that use class_name globals must be imported once
+# before running (godot --headless --path <proj> --import); the cache is
+# regenerated, never committed.
 .godot/
 __pycache__/
 *.pyc
