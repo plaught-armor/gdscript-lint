@@ -150,6 +150,18 @@ Autoload lands just above the instance-method tier and well below `get_node()`
 (~9.8× in the dispatch bench) — confirms "use the global ident, don't `get_node()`
 an autoload in a hot path."
 
+## Dict access — P9 (bench_dict_access.gd)
+
+Backs Part I's P9 row (#68834, Lua-style `d.key` slower than `d["key"]`, fixed
+4.4). N=2M, best-of-7, 2 runs, Godot 4.8.dev:
+
+| Access | ratio (`d.key` / `d["key"]`) | reading |
+|---|---|---|
+| `d.key` vs `d["key"]` | **1.01×** | gap closed — confirmed fixed |
+
+So the old "use brackets for speed" argument is dead on 4.8.dev; bracket access
+remains the style preference for type-clarity (S7), not perf.
+
 ## Promotion criterion
 
 Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:

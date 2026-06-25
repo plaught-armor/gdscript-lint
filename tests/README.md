@@ -68,6 +68,7 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `bench_static_typing.gd` | III §5, II §1 | typed vs untyped; `:=` vs explicit |
 | `bench_group_ops.gd` | IV D2a | group membership O(1); `get_nodes_in_group` alloc; `is` vs `is_in_group` |
 | `bench_convention_dispatch.gd` | IV D7a | `keys()[id].to_lower()` vs `if/elif` helper |
+| `bench_dict_access.gd` | I P9 | `d.key` vs `d["key"]` (the #68834 perf gap, fixed 4.4) |
 | `autoload_bench_proj/` | III §2 | autoload global-ident call (needs a real project) |
 | `repro_typed_collections.gd` | I (C1/C2/C3/C14/C16) | re-tests const/typed-collection bug status on this build |
 | `repro_lifecycle.gd` | I (C7/C8/C10/H8/M9/C11/C2a + C3.map) | re-tests object-lifecycle bug status |
@@ -76,6 +77,7 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `repro_c4_covariance.gd` | I (C4) | typed-array variance — element-covariance, `assign()`, invariant direct assign |
 | `repro_node_leak.gd` | I (C13) | unparented `Node.new()` leak vs `free()` control (OBJECT_COUNT) |
 | `repro_h12_proj/` | I (H12) | `@export` Resource survives scene load — needs a project |
+| `repro_assert_proj/` | I (C12) | `assert()` body runs in debug, stripped in release — run under both an editor (debug) and a `linux_release` template (release) build |
 
 The two `repro_*` scripts are how the Part I version-status table's "Re-tested
 4.8.dev" column was filled — re-run them on your own target before trusting any

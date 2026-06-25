@@ -362,8 +362,16 @@ if not _validate_state():
     OS.crash("state corrupted")
 ```
 
-**Issue / status.** **By design** — `assert()` is a debug aid. No issue
-number. Lint flag: **C12**.
+**Issue / status.** **By design** — `assert()` is a debug aid. No issue number.
+**Confirmed empirically** (`tests/repro_assert_proj/`): the same scene, where
+`assert()` calls a function that flips a flag, was run under both a debug build
+(4.8.dev editor) and a release build (the `linux_release.x86_64` export template,
+4.5.beta5 — the only release binary on hand; assert-stripping is a version-stable
+compile-time behavior). Debug: the flag was set (`assert-body-ran=true`,
+`is_debug=true`). Release: the flag was **not** set (`assert-body-ran=false`,
+`is_debug=false`) — so the entire `assert()`, *including its argument expression*,
+is compiled out. Never put a load-bearing side effect inside `assert()`. Lint
+flag: **C12**.
 
 ---
 
@@ -482,7 +490,7 @@ disagree, trust the empirical column **for that build only**.
 | C8 | freed-id reuse | [#32383](https://github.com/godotengine/godot/issues/32383) | **By design** — validity + type check | **Confirmed** — `instance_from_id(freed)` → null |
 | C10 | `super()` in `_init` | [#76938](https://github.com/godotengine/godot/issues/76938) | **Fixed 4.2** | **Confirmed fixed** — `super()` runs base ctor |
 | C11 | `sort_custom` strict `<` | [#58878](https://github.com/godotengine/godot/issues/58878) | **Live** | Not stable by contract (this input held order) |
-| C12 | `assert()` stripped in release | — | **By design** | — (needs a release export) |
+| C12 | `assert()` stripped in release | — | **By design** | **Confirmed** — assert body runs in debug, stripped in release (ran=false) |
 | C13 | `Node.new()` leak | — | Pattern | **Confirmed** — 2000 unparented `Node.new()` leaked 2000; `free()` → 0 |
 | C14 | `range(n)` typed as `Array[int]` | [#110659](https://github.com/godotengine/godot/issues/110659) | **Live** | **Live** — `range()` element type is untyped |
 | C15 | typed Dict + `Packed*` value | [#116947](https://github.com/godotengine/godot/issues/116947) | **Live** (dup of #88753) | — (C1 fixed → re-check on target) |
@@ -491,7 +499,7 @@ disagree, trust the empirical column **for that build only**.
 | H8 | freed-Node truthiness lies | [#59816](https://github.com/godotengine/godot/issues/59816) | **Fixed 4.4** (≤4.3 still lie) | **Confirmed fixed** — `is_instance_valid(freed)`=false |
 | H12 | `@export` Resource null on load | [#110394](https://github.com/godotengine/godot/issues/110394) | **Fixed 4.6** | **Confirmed fixed** — `@export` Resource survives scene load |
 | M9 | `Resource.duplicate(true)` skips Array | [#74918](https://github.com/godotengine/godot/issues/74918) | **Fixed 4.5** via `duplicate_deep()` | **Confirmed fixed** — deep-dup, original unaffected |
-| P9 | Lua-style dict-access perf | [#68834](https://github.com/godotengine/godot/issues/68834) | **Fixed 4.4** | — |
+| P9 | Lua-style dict-access perf | [#68834](https://github.com/godotengine/godot/issues/68834) | **Fixed 4.4** | **Confirmed fixed** — `d.key` vs `d["key"]` = 1.01× (gap closed) |
 
 Keep every warning your project's minimum Godot predates. The
 discipline of this Bible is the same as Part III's: workarounds are
