@@ -7,7 +7,8 @@ Draws from [`../rules/dod.md`](../rules/dod.md). For the rules **composed** into
 runnable subsystems — strawman → data-oriented decomposition, with verified
 output — see the worked examples: [combat](ex-combat.md) (D1–D8 + P6 + C2a +
 swap-back/cull), [perception](ex-perception.md) (existence-based state +
-the corrected D8), [inventory](ex-inventory.md) (D11 — one table, no
+the corrected D8), [membership](ex-membership.md) (D2b — owner-held array vs
+tree-global group), [inventory](ex-inventory.md) (D11 — one table, no
 mirrors), [object pool](ex-pool.md) (P21 free-list + slot reuse),
 [spatial hash](ex-spatial.md) (neighbor queries that do less),
 [save/load](ex-save.md) (relational POD, ids not objects), and
@@ -174,7 +175,7 @@ var damage: int
 var crit: bool
 
 class_name CombatSystem extends RefCounted
-static func resolve(hit: HitResult, target: Enemy):
+static func resolve(hit: HitResult, target: Enemy) -> void:
     target.health -= hit.damage
     if hit.crit: target.stagger()
 ```
@@ -228,11 +229,11 @@ func _physics_process(d): if _dead: return; ...
 func take_damage(amt, src): if _dead or amt <= 0: return; ...
 
 # Good — group is source of truth.
-func _ready(): add_to_group(&"alive")
-func take_damage(amt, src):
+func _ready() -> void: add_to_group(&"alive")
+func take_damage(amt: int, src: Node) -> void:
     if not is_alive() or amt <= 0: return
     ...
-func _die(src):
+func _die(src: Node) -> void:
     remove_from_group(&"alive")
     set_physics_process(false); set_collision_layer(0)
     died.emit(src)
@@ -254,6 +255,13 @@ Four reasons this is better:
    `set_physics_process(false)` + `set_collision_layer(0)` in the same place,
    so the entity stops ticking *and* stops being hit. No per-method guards left
    to forget.
+
+That this membership lives in a *group* is itself a choice, not a given. A group
+is a tree-global namespace; it earns its place here only if the alive-set is
+queried tree-wide by decoupled systems. If one `EnemyManager` owns every spawn
+and death, a manager-held `Array[Enemy]` is the more local source of truth — see
+"Groups are a global namespace" below. The principle is membership-not-flag; the
+*container* is a separate decision.
 
 Same shape extends to per-member metadata: `poisoned_for: float = 0.0` on every
 enemy becomes a `Dictionary[int, float]` keyed by the instance ID of the
@@ -332,8 +340,76 @@ Groups are for sets that don't correspond to a class (`&"alive"`, `&"alerted"`,
 And the hand-rolled alternative — `static var alive: Array[Enemy]`, push from
 `_ready`, pull from `_exit_tree` — re-implements the HashMap with worse
 ergonomics: every spawner has to remember the push, every death path has to
-remember the pull, and forgetting one is silent corruption. Default to groups;
-roll your own only when you need typed storage or save-side serialization.
+remember the pull, and forgetting one is silent corruption. Reach for a group
+when the membership is genuinely tree-wide — but that "genuinely" is
+load-bearing, and it's the next point.
+
+### Groups are a global namespace — ration them like autoloads (D2b)
+
+**In plain terms:** a group is a label registered on the *whole* scene tree, not
+on any one node or subtree. Anyone, anywhere, can join `&"alive"` or ask for
+everyone in it. That global reach is exactly why groups want rationing — the same
+discipline an autoload singleton gets (§8).
+
+A group lives in the `SceneTree`'s single `HashMap<StringName, Group>`,
+process-global. `get_nodes_in_group(&"alive")` returns *every* tagged node in the
+entire tree — in unspecified order, freshly allocated (D2a) — with no subtree
+scoping and no memory locality. The name is a global identifier carrying the same
+hazards as an autoload name: two unrelated systems that both reach for `&"active"`
+silently share one set, and any scoping has to be hand-encoded into the string
+(`&"room3_enemies"`) — the tell of a namespace you're managing by convention.
+
+So reserve groups for the autoload-shaped case — membership that is (1)
+**tree-wide**, (2) queried by **decoupled** consumers that hold no reference to an
+owner, and (3) **runtime-variable**. `&"interactable"` (the player's interact
+raycast hits whatever is tagged), `&"save_participants"` (the save system sweeps
+the tree at a checkpoint), a `&"boss"` lookup a HUD reads without owning the boss
+— tree-wide, owner-less, decoupled. That's what the global registry is *for*.
+
+When a **single owner sees every add and remove** — a manager that spawns and
+kills its enemies, a room that owns its occupants — that owner holds the
+membership directly, in a typed `Array[T]` (contiguous, typed iteration,
+save-friendly) or a `Dictionary[int, T]` keyed by id (per-subset metadata). No
+group: the owner already *is* the source of truth, and its array has the locality
+a tree-scattered group set cannot. This is the shape §4 (split by access pattern)
+and §8 (the manager's cached `_alive`) already land on — and once the owner sees
+every transition, the group is a global registry it doesn't need.
+
+```gdscript
+# Bad — a tree-global group for membership a single owner already sees. One name
+# spans the whole tree, so "alive in THIS room" is unanswerable without minting
+# &"roomN_alive" per room (a namespace you now manage by string convention).
+func _ready() -> void: add_to_group(&"alive")
+func _die() -> void:   remove_from_group(&"alive")
+var here := get_tree().get_nodes_in_group(&"alive")   # every room, mixed; fresh alloc
+
+# Good — the owner that sees every spawn + death holds the set directly: typed,
+# scoped, local. "Alive in this room" is a bare size(), no global name to collide.
+class_name Room extends Node
+var _alive: Array[Enemy] = []
+func spawn(e: Enemy) -> void: add_child(e); _alive.append(e)   # owner sees the add
+func alive_count() -> int:    return _alive.size()    # scoped, O(1), no global name
+# removal: swap-back — the set is unordered, so O(1), not erase/remove_at's O(n)
+# shift (P6 / the removing-dead-entities note). Full kill() in ex-membership.
+
+# Still a group — tree-wide, owner-less, decoupled consumer (the right call):
+door.add_to_group(&"interactable")   # the player's raycast queries the whole tree
+```
+
+| Membership is… | Container | Why |
+|---|---|---|
+| tree-wide, decoupled consumers, no single owner | group `&"tag"` | engine's global registry; O(1) membership (D2a) |
+| owned by one manager / room that sees every add + remove | that owner's typed `Array[T]` | locality, typed, save-friendly, no global name |
+| per-entity data on a subset | `Dictionary[int, T]` keyed by id | answers "what data", not just "in the set" |
+
+The §2 principle is unchanged — **state is membership, not a flag**. What this adds
+is the second question: *whose* membership, at *what* scope. A group is one of
+three containers, not the default; spend it when the set is genuinely global and
+decoupled, keep it local otherwise. A group is a global tool — spend it like one.
+
+Runnable: [the membership example](ex-membership.md) — two rooms, owner-held
+arrays vs a tree-global `&"alive"`, plus the legit `&"interactable"` group, with
+verified output ([`tests/example_dod_membership_proj/`](../tests/example_dod_membership_proj/)).
 
 ---
 
@@ -355,9 +431,9 @@ func take_damage(amt: int, src: Node): _attacker = src
 
 # Good — store ID, resolve on use.
 var _attacker_id: int = 0
-func take_damage(amt: int, src: Node):
+func take_damage(amt: int, src: Node) -> void:
     _attacker_id = src.get_instance_id() if src != null else 0
-func _retaliate():
+func _retaliate() -> void:
     var s: Object = instance_from_id(_attacker_id)
     if s is Enemy and s.is_alive(): ...
 ```

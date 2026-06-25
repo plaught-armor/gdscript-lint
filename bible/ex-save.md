@@ -15,7 +15,7 @@ doors are open — never the live objects themselves. Loading rebuilds from that
 ## The naive shape (and why it rots)
 
 ```gdscript
-# Tempting — save the live objects:
+# Naive — save the live objects (tempting, but they don't serialize):
 save.player = player_node              # a Node ref: doesn't serialize
 save.held_item = current_weapon        # an ItemDef object: dangles / bloats
 ResourceSaver.save(save, "user://s.tres")

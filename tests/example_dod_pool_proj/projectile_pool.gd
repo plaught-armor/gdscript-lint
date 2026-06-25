@@ -7,9 +7,11 @@ extends RefCounted
 ## free-list — `_free` is a stack of unused slot indices. spawn() pops, despawn
 ##             pushes: O(1) acquire/release, no scan for a free slot.
 ## D8 + dead-removal — tick() walks only the DENSE `_active` list (not all CAP
-##             slots), advances each inline, and on expiry returns the slot to the
-##             pool via swap-back removal from `_active` (P6: O(1), order-agnostic
-##             — a pool doesn't care about projectile order).
+##             slots) in one WRITE-CURSOR compaction pass: survivors advance and
+##             compact toward cursor `w`, expired slots return to `_free`, one
+##             `resize(w)` drops the tail. Beats repeated swap-back for a subset
+##             cull (the removing-dead-entities note) and fuses the survivor
+##             update into the same pass.
 ##
 ## "Spawn" reuses a freed slot index, so the SoA arrays never grow or reallocate.
 
@@ -43,21 +45,22 @@ func spawn(pos: Vector2, vel: Vector2, ttl: float) -> int:
 	return slot
 
 
-# D8 — one inline pass over the active set. Expired projectiles return their slot
-# to the free stack and are swap-back removed from _active (don't advance i; the
-# swapped-in slot is re-checked next iteration). Condition-while, not a countdown.
+# D8 + dead-removal — one inline forward pass, WRITE-CURSOR compaction (the
+# removing-dead-entities note): survivors compact toward cursor w, expired slots
+# return to the free stack. One pass, one resize — beats repeated swap-back for a
+# subset cull, and each survivor's TTL/position advance happens in the same pass.
 func tick(dt: float) -> void:
-	var i: int = 0
-	while i < _active.size():
-		var slot: int = _active[i]
+	var w: int = 0 # write cursor: next survivor position
+	for r: int in _active.size():
+		var slot: int = _active[r]
 		_ttl[slot] -= dt
 		if _ttl[slot] <= 0.0:
-			_free.append(slot) # return the slot to the pool — reused on next spawn
-			_active[i] = _active[_active.size() - 1]
-			_active.resize(_active.size() - 1)
+			_free.append(slot) # expired → slot back to the pool, not kept
 		else:
 			_pos[slot] = _pos[slot] + _vel[slot] * dt
-			i += 1
+			_active[w] = slot # keep: compact toward the front
+			w += 1
+	_active.resize(w) # drop the culled tail in one resize
 
 
 func active_count() -> int:

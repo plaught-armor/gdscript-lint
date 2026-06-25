@@ -1,6 +1,6 @@
 # GDScript Rules — Index
 
-**Canonical knowledge** — teaching prose + rationale for each rule. These files are the source of truth; an automated linter / reviewer enforces a subset of them as terse flag conditions that cite back here. `dod.md` is the full data-oriented-design deep-dive (rules D1-D11, incl. D2a/D7a/D10a).
+**Canonical knowledge** — teaching prose + rationale for each rule. These files are the source of truth; an automated linter / reviewer enforces a subset of them as terse flag conditions that cite back here. `dod.md` is the full data-oriented-design deep-dive (rules D1-D11, incl. D2a/D2b/D7a/D10a).
 
 | File | When to load |
 |---|---|

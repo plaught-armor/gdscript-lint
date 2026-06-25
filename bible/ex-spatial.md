@@ -39,7 +39,7 @@ The query visits only the cells covering the query AABB — `≈3×3` when the c
 size matches the radius — and refines by squared distance (no `sqrt`):
 
 ```gdscript
-func query_radius(positions, center, radius, out) -> int:
+func query_radius(positions: PackedVector2Array, center: Vector2, radius: float, out: PackedInt32Array) -> int:
 	var r2: float = radius * radius
 	var lo: Vector2i = _cell_of(center - Vector2(radius, radius))
 	var hi: Vector2i = _cell_of(center + Vector2(radius, radius))

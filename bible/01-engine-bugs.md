@@ -40,6 +40,7 @@ on read. The values you wrote at declaration are gone.
 **Repro.**
 
 ```gdscript
+# Repro — const Packed*Array reports byte-count size and reads 0.0.
 const TABLE: Array[PackedFloat32Array] = [
     PackedFloat32Array([1.0, 2.0, 3.0]),
 ]
@@ -56,8 +57,10 @@ plain `var`. Initialise with a bare literal; the typed annotation does the
 conversion, and a constructor wrapper is redundant:
 
 ```gdscript
-var TABLE: PackedInt32Array = [1, 2, 3]   # good
-var TABLE: PackedInt32Array = PackedInt32Array([1, 2, 3])  # redundant
+# Good — bare literal; the typed annotation does the conversion.
+var TABLE: PackedInt32Array = [1, 2, 3]
+# Bad — redundant Packed*Array constructor wrapper (S6b).
+var TABLE: PackedInt32Array = PackedInt32Array([1, 2, 3])
 ```
 
 Holds for every `Packed*Array` family member: `PackedByteArray`,
@@ -92,6 +95,7 @@ the mutation outlives the call and survives across scene reloads.
 **Repro.**
 
 ```gdscript
+# Repro — const Array/Dictionary is a shared mutable reference.
 const TAGS: Array[String] = ["alpha", "beta"]
 
 func a() -> void:
@@ -165,6 +169,7 @@ the typing.
 **Repro.**
 
 ```gdscript
+# Repro — typed .filter()/.map() returns an untyped Array (#72566).
 var queue: Array[BattlePawn] = [...]
 
 # This errors at runtime: "Trying to assign array of type 'Array' to 'Array[BattlePawn]'"
@@ -216,6 +221,7 @@ object — or, worse, at a *different* object that reused the instance id
 **Repro.**
 
 ```gdscript
+# Repro — await on a freed object leaks or crashes.
 func chase(target: Node) -> void:
     await get_tree().create_timer(2.0).timeout
     target.take_damage(10)   # target may be freed; crash or wrong-object hit
@@ -261,6 +267,7 @@ a method call dispatches to the wrong object.
 **Repro.**
 
 ```gdscript
+# Repro — freed-object id reuse resolves a stale ref to the wrong object.
 var _attacker: Node = null
 
 func remember(src: Node) -> void:
@@ -313,6 +320,7 @@ climbing.
 **Repro.**
 
 ```gdscript
+# Repro — two RefCounteds referencing each other leak silently (no cycle GC).
 class_name Node_ extends RefCounted
 var neighbour: Node_
 
@@ -371,12 +379,13 @@ arr.sort_custom(func(a, b): return a.priority < b.priority)   # ties shuffle
 expect:
 
 ```gdscript
-arr.sort_custom(
-    func(a, b):
-        if a.priority != b.priority:
-            return a.priority < b.priority
-        return a.id < b.id   # tiebreaker
-)
+arr.sort_custom(_by_priority)
+
+# Named comparator (S1: a multi-statement body belongs in a method, not inline).
+func _by_priority(a: Pawn, b: Pawn) -> bool:
+    if a.priority != b.priority:
+        return a.priority < b.priority
+    return a.id < b.id   # tiebreaker — strict, deterministic on ties
 ```
 
 **Issue / status.** [#58878](https://github.com/godotengine/godot/issues/58878).

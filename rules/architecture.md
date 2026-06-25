@@ -90,7 +90,7 @@ static func _validate() -> void:
 
 No parallel `SCENES` array — derive pickup-scene path by convention (D7a) or fold into `ItemDef` field. See [`dod.md`](dod.md) D11.
 
-`_static_init` runs the first time the class is referenced. `RegistryRoot._ready` references each registry once (e.g. `var _ := ItemRegistry.ALL.size()`) to force the static-init order at boot — predictable, fail-loud, no `validate()` API on the registry itself.
+`_static_init` runs the first time the class is referenced. `RegistryRoot._ready` references each registry once (e.g. `var _n: int = ItemRegistry.ALL.size()`) to force the static-init order at boot — predictable, fail-loud, no `validate()` API on the registry itself.
 
 ### Manager (batched-tick, D8)
 
@@ -148,6 +148,7 @@ Parent scene-root calls `_hud.init_hud(...)` once. Controllers borrow widgets vi
 | Label set: `enum` or `StringName`? | `enum` for closed/finite sets; `StringName` only for engine APIs or string-like ops | [`dod.md`](dod.md) D10/D10a |
 | Optional state: bool flag or set membership? | Group/dict membership over `_dead: bool` / `_alerted: bool` | [`dod.md`](dod.md) D2 |
 | Set ID: `is Player` or `is_in_group(&"player")`? | `is Player` when class-narrowing fits — same O(1), compile-time-checked | [`dod.md`](dod.md) D2a |
+| Membership container: group or owner-held array? | group only if tree-wide + decoupled consumers + no single owner; else the owner's typed `Array[T]` / `Dictionary[int, T]` | [`dod.md`](dod.md) D2b |
 | Helper: static-RefCounted or autoload Node? | static-RefCounted; promote only when state needed | [`dod.md`](dod.md) D9 |
 | `class_name` on an autoload script? | No — collides with the autoload name (`Class hides an autoload singleton`). Bare `extends Node`, access by autoload name | "Canonical autoloads" note above |
 | Cross-system / serialized ref: object or ID? | Integer ID + resolve at use site; object refs only for parent→child + sibling-by-injection | [`dod.md`](dod.md) D3 |

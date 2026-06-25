@@ -90,8 +90,9 @@ along one axis: **does this need state?**
 - **No state, just static functions or constants → `class_name`'d RefCounted, no
   autoload entry.**
 
-The autoload pays a per-call indirection cost (Part III §2: autoload global
-identifier ≈ 2.43× inline; a static func on a `class_name`'d RefCounted ≈ 2.27×).
+The autoload pays a per-call indirection cost (Part III §2, measured 4.8.dev:
+autoload global identifier ≈ 5.7× inline; a static func on a `class_name`'d
+RefCounted ≈ 4.1×).
 That's a small constant, but the more important difference is *semantic*: an
 autoload exists in the SceneTree and can hold signals; a static-only RefCounted
 is purely a namespace for functions and constants. Reach for the autoload when
@@ -258,7 +259,7 @@ Three things this shape locks in:
   as a field. The parity-asserting test that would otherwise guard the two
   arrays' length-alignment is the giveaway.
 
-`RegistryRoot` references each registry once (e.g. `var _ := ItemRegistry.ALL.size()`)
+`RegistryRoot` references each registry once (e.g. `var _n: int = ItemRegistry.ALL.size()`)
 so each registry validates at boot, fail-loud, with no `validate()` API on the
 registry itself. The crash-on-validation-failure path is intentional: a
 half-loaded registry that silently returns `null` for a missing item is the
@@ -304,12 +305,19 @@ the `_ready` body is just a convenient, guaranteed-reachable place to do so.
 
 **In plain terms:** instead of every enemy asking the engine "update me"
 every frame, one Manager keeps a list of all the live enemies and updates
-them itself with one loop. Faster than thousands of separate update calls,
-and dead enemies aren't on the list to begin with.
+them in one loop. The win isn't a cheaper call — measured, looping nodes and
+calling each one's `tick()` is actually a touch *slower* than letting them
+self-update. The win is that dead and distant enemies aren't in the list, so
+their work simply doesn't happen.
 
 A manager owns the per-frame loop for N entities of one kind. The per-entity
 script does not run `_physics_process` — the manager does, once, over its
-cached collection. This is the D8 batched-tick rule made concrete.
+cached collection. This is the D8 batched-tick rule made concrete — but heed
+D8's measured correction (Part IV §8): centralizing the *call* (a `tick()` per
+node) is **not** itself a speed-up — it measured ~2× *slower* than per-node
+`_physics_process`. The manager earns its keep through the **control** it
+enables — skip the dead, LOD the distant — and, for the dispatch win, going
+full SoA (manager-owned `Packed*Array`s, no per-entity call).
 
 ```gdscript
 class_name EnemyManager extends Node
@@ -322,7 +330,8 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
     for e: Enemy in _alive:               # typed for (H2)
-        e.tick(delta)
+        e.tick(delta)                     # a call per entity — for CONTROL, not a
+                                          # dispatch win (§8: ~2× slower than per-node)
 ```
 
 Per-enemy `set_physics_process(false)` in `_ready` — Manager owns the loop.
@@ -422,6 +431,7 @@ up on a new subsystem.
 | Label set: `enum` or `StringName`? | `enum` for closed/finite sets; `StringName` only for engine APIs or string-like ops | [`dod.md`](../rules/dod.md) D10/D10a |
 | Optional state: bool flag or set membership? | Group/dict membership over `_dead: bool` / `_alerted: bool` | [`dod.md`](../rules/dod.md) D2 |
 | Set ID: `is Player` or `is_in_group(&"player")`? | `is Player` when class-narrowing fits — same O(1), compile-time-checked | [`dod.md`](../rules/dod.md) D2a |
+| Membership container: group or owner-held array? | group only if tree-wide + decoupled consumers + no single owner; else the owner's typed `Array[T]` / `Dictionary[int, T]` | [`dod.md`](../rules/dod.md) D2b |
 | Helper: static-RefCounted or autoload Node? | static-RefCounted; promote only when state needed | [`dod.md`](../rules/dod.md) D9 |
 | `class_name` on an autoload script? | No — collides with the autoload name (`Class hides an autoload singleton`). Bare `extends Node`, access by autoload name | §2a above |
 | Cross-system / serialized ref: object or ID? | Integer ID + resolve at use site; object refs only for parent→child + sibling-by-injection | [`dod.md`](../rules/dod.md) D3 |

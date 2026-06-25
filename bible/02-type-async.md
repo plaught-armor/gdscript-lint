@@ -150,8 +150,9 @@ break-even with `for i: int in N`); the breakage is at the *assignment*:
 # Bad — silently untyped despite the annotation.
 var indices: Array[int] = range(10)
 
-# Good — explicit construct.
-var indices: Array[int] = []
+# Good — explicit construct. (Array[int] is C14's subject: a Packed*Array has no
+# untyped-range bug, so S6's "prefer Packed" doesn't apply to this illustration.)
+var indices: Array[int] = []  # gdlint: ignore[S6]
 indices.assign(range(10))
 ```
 
@@ -399,9 +400,7 @@ print(count)  # 0
 
 # Good — `_count` is a member, mutated through self.
 var _count: int = 0
-arr.for_each(func(item):
-    _count += 1
-)
+arr.for_each(func(item): _count += 1)   # single-expr lambda (S1-exempt)
 print(_count)  # arr.size()
 ```
 
@@ -657,16 +656,16 @@ for e in enemies:
         enemies.erase(e)
 
 # Good — reverse index iteration tolerates removal.
-for i in range(enemies.size() - 1, -1, -1):
+for i: int in range(enemies.size() - 1, -1, -1):
     if not enemies[i].is_alive():
         enemies.remove_at(i)
 
 # Or: collect then delete.
 var dead: Array[Enemy] = []
-for e in enemies:
+for e: Enemy in enemies:
     if not e.is_alive():
         dead.append(e)
-for e in dead:
+for e: Enemy in dead:
     enemies.erase(e)
 ```
 

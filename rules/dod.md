@@ -35,11 +35,11 @@ func _physics_process(d): if _dead: return; ...
 func take_damage(amt, src): if _dead or amt <= 0: return; ...
 
 # Good — group is source of truth.
-func _ready(): add_to_group(&"alive")
-func take_damage(amt, src):
+func _ready() -> void: add_to_group(&"alive")
+func take_damage(amt: int, src: Node) -> void:
     if not is_alive() or amt <= 0: return
     ...
-func _die(src):
+func _die(src: Node) -> void:
     remove_from_group(&"alive")
     set_physics_process(false); set_collision_layer(0)
     died.emit(src)
@@ -63,7 +63,39 @@ Only footgun: `get_nodes_in_group` in a hot loop ([proposal #7080](https://githu
 
 Better than `is_in_group` when applicable: `is_in_group(&"player")` → `is Player`. Same O(1), compile-time-checked, no `StringName` hash, no typo, no tag-the-node requirement. Per-member metadata → `Dictionary[int, RecordType]` keyed by `get_instance_id()`. Groups answer "is it in the set"; dicts answer "what data does it have."
 
-Trap: hand-rolled `static var alive: Array[Enemy]` skips the engine's hashset, re-implements with worse ergonomics (every spawner pushes, every `_exit_tree` pulls, forgetting one is silent). Default to groups; only roll your own for typed storage or save-side serialization.
+Trap: hand-rolled `static var alive: Array[Enemy]` skips the engine's hashset, re-implements with worse ergonomics (every spawner pushes, every `_exit_tree` pulls, forgetting one is silent). Reach for a group when membership is genuinely tree-wide; keep it local otherwise — D2b.
+
+## D2b — Groups are a global namespace; ration like autoloads
+
+A group is registered on the **whole `SceneTree`** (one process-global `HashMap<StringName, Group>`), not a node or subtree. `get_nodes_in_group(&"x")` sweeps the entire tree, unspecified order, fresh alloc — no subtree scope, no memory locality. So a group name is a **global identifier with autoload-grade hazards**: two unrelated systems both grabbing `&"active"` silently share one set; scope must be hand-encoded into the string (`&"room3_enemies"`) = a namespace managed by convention. Membership-not-flag (D2) is unchanged; the open question is *which container*, at *what scope*.
+
+| Membership is… | Container | Why |
+|---|---|---|
+| tree-wide, decoupled consumers, no single owner | group `&"tag"` | engine's global registry; O(1) (D2a) |
+| owned by one manager/room seeing every add+remove | that owner's typed `Array[T]` | locality, typed, save-friendly, no global name |
+| per-entity data on a subset | `Dictionary[int, T]` keyed by id | answers "what data", not just "in set" |
+
+- **Group ⇔ autoload analogy (D9):** global reach + variable membership + decoupled consumers. `&"interactable"` (raycast hits any tagged), `&"save_participants"` (save sweeps tree), HUD reading `&"boss"` without owning it. That's what the global registry is for.
+- **Single owner sees every transition → no group.** A manager that spawns+kills its enemies already *is* the source of truth; its `Array[Enemy]` (refreshed inline, not via group signals) has the locality a tree-scattered group set can't. This is the D4/D8 shape. The group there is a global registry the owner doesn't need.
+- **Smell:** scope baked into a group name (`&"room3_enemies"`, `&"team_a_alive"`) → the set isn't tree-wide; it belongs to whoever owns that scope. A group queried by exactly one system that already holds the members → drop the group, hold the array.
+
+```gdscript
+# Bad — tree-global group for membership one owner already sees. "Alive in THIS
+# room" needs a minted &"roomN_alive" per room — namespace-by-convention.
+func _ready() -> void: add_to_group(&"alive")
+var here := get_tree().get_nodes_in_group(&"alive")   # every room mixed; fresh alloc
+
+# Good — the owner holds the set: typed, scoped, local, no global name.
+class_name Room extends Node
+var _alive: Array[Enemy] = []
+func spawn(e: Enemy) -> void: add_child(e); _alive.append(e)
+func alive_count() -> int:    return _alive.size()    # O(1), this room only
+
+# Still a group — tree-wide, owner-less, decoupled consumer (the right call):
+door.add_to_group(&"interactable")                    # player raycast sweeps the tree
+```
+
+Worked example (runnable, verified 4.8.dev): `tests/example_dod_membership_proj/` + bible `ex-membership.md`.
 
 ## D3 — Reference by integer ID, not object pointer
 
@@ -78,9 +110,9 @@ func take_damage(amt: int, src: Node): _attacker = src
 
 # Good — store ID, resolve on use.
 var _attacker_id: int = 0
-func take_damage(amt: int, src: Node):
+func take_damage(amt: int, src: Node) -> void:
     _attacker_id = src.get_instance_id() if src != null else 0
-func _retaliate():
+func _retaliate() -> void:
     var s: Object = instance_from_id(_attacker_id)
     if s is Enemy and s.is_alive(): ...
 ```
@@ -124,7 +156,7 @@ var damage: int
 var crit: bool
 
 class_name CombatSystem extends RefCounted
-static func resolve(hit: HitResult, target: Enemy):
+static func resolve(hit: HitResult, target: Enemy) -> void:
     target.health -= hit.damage
     if hit.crit: target.stagger()
 ```
@@ -219,17 +251,17 @@ So a manager-of-Nodes earns its keep by **doing less**, not by cheaper dispatch:
 
 ## D9 — Static-on-RefCounted vs autoload Node
 
-Measured Godot 4.7-beta (1M iters × 3):
+Measured Godot 4.8.dev (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, best-of-7; see bible Part III §2). Supersedes the older 4.7-beta run — absolute ratios spread wider and the instance/autoload order flipped (instance method now edges out the autoload):
 
 | Dispatch | × inline |
 |---|---|
 | inline | 1.00 |
-| `static func` on `class_name`d RefCounted | ~2.27 |
-| autoload global ident (`SoundBus.emit(...)`) | ~2.43 |
-| instance method on cached ref | ~2.67 |
-| `get_node(^"AutoloadName").method()` per call | ~4.06 |
-| signal_emit, 1 listener | ~4.5 |
-| signal_emit, 4 listeners | ~5.8–11.6 |
+| `static func` on `class_name`d RefCounted | ~4.1 |
+| instance method on cached ref | ~5.3 |
+| autoload global ident (`SoundBus.emit(...)`) | ~5.7 |
+| `get_node(^"AutoloadName").method()` per call | ~9.8 |
+| signal_emit, 1 listener | ~9.5 |
+| signal_emit, 4 listeners | ~23 |
 
 - Pure-fn helper → `class_name FooSystem extends RefCounted` + `static func` only. Never instantiate.
 - Cache/registry/RNG seed/pub-sub signal → autoload Node (must be Node to own signals).
@@ -250,14 +282,14 @@ Most dispatch cost invisible vs frame budget. Matters only in measured hot loops
 
 | # | Move | Speedup | When |
 |---|---|---|---|
-| 1 | Static typing on every var/param/return | ~40-50% | always (mandatory) |
+| 1 | Static typing on every var/param/return | ~25-47% (workload-dep; ~1.35× typical, 4.8.dev) | always (mandatory) |
 | 2 | Typed math fns (`clampf`/`absf`/`lerpf`) | ~20-30% per call | always |
 | 3 | `@onready` / cached node refs (no `get_node` per call) | ~1.7× | always |
 | 4 | Hoist invariants out of hot loop | linear w/ iter count | measured hot loops |
 | 5 | Avoid alloc (Dict literals, `[]`/`{}`, `.new()`) in hot path | 2-10× | profiler-pointed |
 | 6 | Typed RefCounted records over Dictionaries | ~2-3× field access vs key hash | cross-fn results |
 | 7 | `Packed*Array` over `Array[float]`/`Array[int]` | 3-5× iter | bulk numeric |
-| 8 | Hand-inline the hot body | ~2.27× | profiler-confirmed |
+| 8 | Hand-inline the hot body | ~4.1× (removes a static-func call, 4.8.dev) | profiler-confirmed |
 | 9 | GDExtension (C++) | 10-100× | last resort |
 | 10 | Lower tick / batch ticks (one EnemyManager loop vs per-Node) | linear w/ freq cut | N × per-frame cost = bottleneck |
 

@@ -8,7 +8,7 @@ extends Node
 
 func _ready() -> void:
 	var mgr: EnemyManager = EnemyManager.new()
-	var ids: Array[int] = []
+	var ids: PackedInt64Array = []
 	ids.append(mgr.spawn(EnemyRegistry.Kind.SKIRMISHER, 8.0)) # id 1, hp 6
 	ids.append(mgr.spawn(EnemyRegistry.Kind.GRUNT, 10.0)) # id 2, hp 10
 	ids.append(mgr.spawn(EnemyRegistry.Kind.BRUTE, 12.0)) # id 3, hp 40

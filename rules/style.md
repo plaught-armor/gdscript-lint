@@ -183,7 +183,7 @@ Pattern preserves "ids in saves, stats in `.tres`" (no runtime-generated resourc
 func test_mk2_equals_base_plus_grip_part() -> void:
     var computed: WeaponDef = UpgradeSystem.apply_part(base.weapon_def, grip.part_def)
     var authored: WeaponDef = mk2.weapon_def
-    for field in [&"dmg_perfect", &"sweet_spot", &"cooldown", ...]:
+    for field: StringName in [&"dmg_perfect", &"sweet_spot", &"cooldown", ...]:
         assert_almost_eq(computed.get(field), authored.get(field), 0.0001, "%s drift" % field)
     assert_eq(computed.installed_features, authored.installed_features)
 ```

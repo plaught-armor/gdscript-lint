@@ -18,7 +18,7 @@ The reflex is one class that *is* an enemy — data and behavior together, one
 object per monster:
 
 ```gdscript
-# The strawman. Every enemy is a fat Node carrying all its own state + behavior.
+# Naive — the strawman: every enemy a fat Node carrying all its state + behavior.
 class_name Enemy extends Node3D
 var max_health: int = 10        # cold: never changes for this kind
 var health: int = 10            # hot: changes every hit

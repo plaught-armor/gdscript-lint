@@ -33,6 +33,7 @@ The rules composed, runnable + verified. Each carries a researched "variants & u
 |---|---|
 | [combat](ex-combat.md) | enemy-combat subsystem, fat-`Enemy` strawman → data-oriented decomposition (D1–D8 + P6 + C2a) |
 | [perception](ex-perception.md) | existence-based alert state + the corrected D8 (inline SoA, do-less) |
+| [membership](ex-membership.md) | D2b — owner-held `Array` vs tree-global `&"alive"` group; ration groups like autoloads |
 | [inventory](ex-inventory.md) | D11, one registry table with convention-derived assets, no mirror arrays |
 | [object pool](ex-pool.md) | P21 free-list + slot reuse, no per-frame alloc |
 | [spatial hash](ex-spatial.md) | cell→occupants neighbor queries that touch a constant few cells |
@@ -47,6 +48,24 @@ Measured single-topic deep-dives. Files prefixed `note-`.
 |---|---|
 | [Removing dead entities](note-removing-dead-entities.md) | swap-back vs write-cursor compaction vs the `remove_at` trap; one removal vs mass cull have different best answers (P6 + D2 + D8) |
 | [StringName vs String](note-stringname-vs-string.md) | use `StringName` (`&"x"`) for identifiers, `String` for text; measured ~1.2×, but mostly correctness + engine-API contract, not speed (D10 + P12a/P12b) |
+
+## Snippet style (good vs bad)
+
+Every `gdscript` code block — or each segment within a mixed block — opens with a
+polarity header comment, and **that header is the only signal** (no prose cues):
+
+| Header | Meaning | Linted? |
+|---|---|---|
+| `# Good — …` | the recommended shape | ✅ enforced |
+| `# Or — …` | a good alternative | ✅ enforced |
+| `# Bad — …` | an anti-pattern | ❌ skipped |
+| `# Repro — …` | an engine-bug repro | ❌ skipped |
+| `# Naive — …` | the strawman before a refactor | ❌ skipped |
+
+An **untagged** block defaults to enforced (must lint clean) — the fail-safe, so
+tag only the bad code. `tests/lint_bible_snippets.py` extracts every block, splits
+on these headers, and runs `gd-lint.py` on the enforced segments; CI fails if any
+trips a rule. That's how the bible's good examples are kept honest to its own rules.
 
 ## What makes this worth reading
 

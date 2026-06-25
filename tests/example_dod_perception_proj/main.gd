@@ -9,7 +9,7 @@ extends Node
 func _ready() -> void:
 	var gm: GuardManager = GuardManager.new()
 	# Guards along X at 2,5,8,11,14,17; mixed view ranges.
-	var ids: Array[int] = []
+	var ids: PackedInt64Array = []
 	ids.append(gm.spawn(Vector3(2, 0, 0), 2.0))
 	ids.append(gm.spawn(Vector3(5, 0, 0), 3.0))
 	ids.append(gm.spawn(Vector3(8, 0, 0), 2.0))

@@ -17,6 +17,7 @@ slots, over and over.
 ## The naive shape
 
 ```gdscript
+# Naive — allocate + free a Node per shot (P21: churn in the hot path).
 func fire():
     var b := Bullet.new()        # allocate every shot
     add_child(b)
@@ -54,23 +55,26 @@ func spawn(pos: Vector2, vel: Vector2, ttl: float) -> int:
 ```
 
 - **`_active` is the dense iterate-set** — `tick` walks *only* the live slots
-  (not all CAP), advances each inline, and on expiry returns the slot to `_free`
-  **and swap-back removes it from `_active`** (P6 — O(1), order irrelevant for a
-  pool). This is the dead-removal pattern, in-loop:
+  (not all CAP), advances each inline, and culls the expired in one **write-cursor
+  compaction** pass: survivors compact toward cursor `w`, expired slots return to
+  `_free`, and a single `resize` drops the tail. This is the
+  [removing-dead-entities](note-removing-dead-entities.md) note's *subset-cull*
+  shape — it beats repeated swap-back when more than one slot expires in a pass,
+  and it's a clean forward `for`, not a hand-rolled `while`:
 
 ```gdscript
 func tick(dt: float) -> void:
-	var i: int = 0
-	while i < _active.size():                # condition-while, not a countdown
-		var slot: int = _active[i]
+	var w: int = 0                          # write cursor: next survivor slot
+	for r: int in _active.size():
+		var slot: int = _active[r]
 		_ttl[slot] -= dt
 		if _ttl[slot] <= 0.0:
-			_free.append(slot)               # slot back to the pool — reused next spawn
-			_active[i] = _active[_active.size() - 1]
-			_active.resize(_active.size() - 1)   # swap-back; don't advance i
+			_free.append(slot)              # expired → slot back to the pool
 		else:
 			_pos[slot] = _pos[slot] + _vel[slot] * dt
-			i += 1
+			_active[w] = slot               # keep: compact toward the front
+			w += 1
+	_active.resize(w)                       # drop the culled tail, one resize
 ```
 
 The invariant `_free.size() + _active.size() == CAP` holds across every op — no
@@ -81,15 +85,15 @@ slot is ever leaked or double-freed, and the SoA arrays never grow.
 ```
 [demo] CAP=8, free=8
 [demo] spawned 5 → slots [0, 1, 2, 3, 4], active=5 free=3
-[demo] after 1.2s tick → active=4 free=4          # one expired, slot returned
-[demo] spawned 2 more → reused slots [0, 5]        # slot 0 RECYCLED, no new storage
+[demo] after 1.2s tick → active=4 free=4
+[demo] spawned 2 more → reused slots [0, 5] (were freed above)
 [demo] active=6 free=2 (CAP still 8, no growth)
 [demo] drained → active=0 free=8
 [demo] over-spawned CAP+ → exhausted spawn returns -1
 ```
 
-The tell is line 4: the next spawn hands back **slot 0** — the one just freed —
-not a ninth slot. The bank is fixed; the indices cycle.
+The tell is the `spawned 2 more` line: the next spawn hands back **slot 0** — the
+one just freed — not a ninth slot. The bank is fixed; the indices cycle.
 
 ## What each rule bought
 
@@ -98,8 +102,8 @@ not a ninth slot. The bank is fixed; the indices cycle.
 | P21 | `.new()` / `free()` per shot | fixed bank, reused slots | no per-frame alloc/GC churn |
 | free-list | scan for a free slot | `_free` stack pop/push | O(1) acquire/release |
 | D4/D5 | fields on N `Bullet` nodes | SoA packed arrays | cache-tight, no `Node` overhead |
-| D8 | N self-ticking bullets | one `while` over `_active` | inline, only live slots |
-| P6 | — | swap-back from `_active` | O(1) return-to-pool, no shift |
+| D8 | N self-ticking bullets | one `for` over `_active` | inline, only live slots |
+| dead-removal | — | write-cursor compaction of `_active` | one pass + one resize; beats repeated swap-back for a subset cull |
 
 ## Variants & use-cases
 

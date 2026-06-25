@@ -17,6 +17,7 @@ flat loop that checks distances* — the data-oriented way.
 ## The naive shape
 
 ```gdscript
+# Naive — N self-ticking sensors, a flag + timer on every guard.
 class_name Guard extends Node3D
 var view_range: float = 3.0
 var _alerted: bool = false        # a flag on every guard

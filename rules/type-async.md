@@ -1,6 +1,6 @@
 # GDScript — Type System & Async
 
-**No `:=`** (H1) — always `var x: Type = value`. Static typing ~40-47% faster (typed instructions).
+**No `:=`** (H1) — always `var x: Type = value`. `:=` is also typed (perf wash, §03 measured), so the ban is consistency/readability, not speed. Static typing vs untyped `var x =` is ~25-47% faster (workload-dep; ~1.35× typical on 4.8.dev).
 
 **Typed `for` loops** (H2) — `for item: Type in collection`. Untyped iter defeats optimization.
 
