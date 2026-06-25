@@ -5,9 +5,10 @@ state as container membership, references by ID, schema by access pattern.
 
 Draws from [`../rules/dod.md`](../rules/dod.md). For the rules **composed** into
 runnable subsystems — strawman → data-oriented decomposition, with verified
-output — see the worked examples: [combat](dod-by-example.md) (D1–D8 + P6 + C2a),
-[perception](dod-perception-example.md) (existence-based state + the corrected
-D8), and [inventory](dod-inventory-example.md) (D11 — one table, no mirrors).
+output — see the worked examples: [combat](dod-by-example.md) (D1–D8 + P6 + C2a +
+swap-back/cull), [perception](dod-perception-example.md) (existence-based state +
+the corrected D8), [inventory](dod-inventory-example.md) (D11 — one table, no
+mirrors), and [object pool](dod-pool-example.md) (P21 free-list + slot reuse).
 
 ---
 
