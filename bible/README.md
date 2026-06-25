@@ -15,12 +15,12 @@ flag conditions; this is the *why* — full symptoms, repros, fixes, and data.
 
 | Part | Covers | Status |
 |---|---|---|
-| [01 — Engine bugs](01-engine-bugs.md) | crashes / leaks / silent corruption, each with issue # + version status | outline |
-| [02 — Type system & async](02-type-async.md) | static typing, lambdas, `await`/coroutine traps, signal lifetimes | outline |
+| [01 — Engine bugs](01-engine-bugs.md) | crashes / leaks / silent corruption, each with issue # + version status | drafted |
+| [02 — Type system & async](02-type-async.md) | static typing, lambdas, `await`/coroutine traps, signal lifetimes | drafted |
 | [**03 — Performance, measured**](03-performance.md) | **dispatch, loops, math, signals — benchmarked, with the wisdom it overturns** | **drafted** |
-| [04 — Data-oriented design](04-data-oriented.md) | existence-based processing, ID refs, hot/cold split, condition tables | outline |
-| [05 — Architecture](05-architecture.md) | project skeleton, autoloads, naming, subsystem shapes | outline |
-| [06 — Resource loading](06-resource-loading.md) | preload/load/threaded, cache modes, UID files | outline |
+| [04 — Data-oriented design](04-data-oriented.md) | existence-based processing, ID refs, hot/cold split, condition tables | drafted |
+| [05 — Architecture](05-architecture.md) | project skeleton, autoloads, naming, subsystem shapes | drafted |
+| [06 — Resource loading](06-resource-loading.md) | preload/load/threaded, cache modes, UID files | drafted |
 
 ## What makes this worth reading
 
