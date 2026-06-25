@@ -60,8 +60,20 @@ transitively viral.
 
 ResourceLoader's cache is **strong-refcount**. There is no separate "weak
 cache." A loaded resource stays in memory as long as any code holds a
-reference (the cache's own entry counts as one); it frees the moment the last
-reference drops. This is the part that catches people:
+reference; it frees the moment the last *external* reference drops, and the cache
+entry goes with it. **4.8.dev: confirmed** (`repro_cache_proj/` → RL2) — load a
+`.tres` into a local, return without keeping it, and `ResourceLoader.has_cached()`
+reads `false` afterward. So the cache entry itself does **not** pin the resource:
+drop every ref you hold and it's gone, no `purge()` needed.
+
+**In plain terms:** the cache isn't a box that holds onto resources for you — it's
+more like a shared address book. While *someone* in your program is holding a
+loaded resource, the cache lets everyone else who asks for the same path get that
+exact instance instead of re-reading the disk. The moment nobody holds it anymore,
+it's freed and the cache forgets it. That's why `load()`-ing a big set-piece into a
+local that goes out of scope cleans up on its own — and why stashing it in an
+autoload array keeps it alive for the whole game whether you meant to or not. This
+is the part that catches people:
 
 ```gdscript
 class_name ItemRegistry extends RefCounted
@@ -96,6 +108,11 @@ still-living node), it stays.
 | `CACHE_MODE_REPLACE` | Cached entries refreshed in place — existing refs see new data. Hot-reload flows. |
 | `CACHE_MODE_IGNORE_DEEP` / `CACHE_MODE_REPLACE_DEEP` | Recursive variants. |
 
+**4.8.dev: confirmed** (`repro_cache_proj/` → RL8) — `CACHE_MODE_REUSE` returns the
+**same instance** as a plain `load()` (same `get_instance_id()`), while
+`CACHE_MODE_IGNORE` returns a **fresh** instance (different id) — exactly the
+table's "pulled from cache" vs "bypass the cache."
+
 Don't pass an explicit `cache_mode` unless you have a specific reason —
 `REUSE` is right almost always. Bugs
 [#82830](https://github.com/godotengine/godot/issues/82830) (PackedScene cache
@@ -118,7 +135,10 @@ ResourceLoader already deduplicates by path. A
 `static var SCENES: Dictionary[int, PackedScene]` populated at boot from
 `load(path)` is **redundant** — every entry is also in the ResourceLoader
 cache, and `load()` with `CACHE_MODE_REUSE` is the cheapest path back to that
-cache. The dedicated Dict adds bookkeeping with zero behavior delta.
+cache. The dedicated Dict adds bookkeeping with zero behavior delta. **4.8.dev:
+confirmed** (`repro_cache_proj/` → RL13) — `load(P)` called twice returns the
+**same instance** (identical `get_instance_id()`), and `ResourceLoader.has_cached(P)`
+is `true` after the first load: the cache *is* your dedup table.
 
 Symptom: a registry autoload with both an `ALL: Array[ItemDef]` (the data
 table) and a `SCENES: Dictionary[int, PackedScene]` (the parallel "cache").
@@ -295,11 +315,18 @@ move silently snaps every link.
 
 A handful of smaller rules that don't justify a section each:
 
-- **`Resource.duplicate()`** makes a shallow copy. Use when you need a
-  per-instance mutable variant of a shared design-time Resource — e.g.
-  per-door reinforcement HP state that starts from the `DoorDef`'s defaults
-  but mutates over the playthrough. Deep duplication has its own footgun (M9
-  in [`../rules/type-async.md`](../rules/type-async.md)).
+- **`Resource.duplicate()`** makes a shallow copy. **4.8.dev: confirmed**
+  (`repro_cache_proj/` → RL22) — after `var dup = orig.duplicate()`, appending to
+  `dup.tags` also changed `orig.tags`: the nested `Array` is the *same* object in
+  both. **In plain terms:** a shallow copy duplicates the box but not what's inside
+  it — top-level fields are copied, but a nested `Array`/`Dictionary`/sub-`Resource`
+  is shared between the original and the copy, so mutating it through one is visible
+  through the other. Use `duplicate()` when you want a per-instance variant of a
+  shared design-time Resource — e.g. per-door reinforcement HP that starts from the
+  `DoorDef` defaults but mutates over the playthrough — and reach for deep
+  duplication (its own footgun, M9 in
+  [`../rules/type-async.md`](../rules/type-async.md)) only when the nested contents
+  must be independent too.
 - **`make_read_only()`** on `Array` / `Dictionary` after boot validate locks
   the structure against accidental mutation. Pairs with `static var` — see
   [`../rules/engine-bugs.md`](../rules/engine-bugs.md) C2a. Shallow only:
