@@ -85,6 +85,8 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `bench_param_types.gd` | II (H4/H10b) | typed vs untyped signal param, typed vs untyped Dict param (both ~wash) |
 | `repro_cache_proj/` | VI (cache) | dedup-by-path, `has_cached`, CACHE_MODE_REUSE/IGNORE, last-ref-drop frees, `duplicate()` shallow — needs a project |
 | `repro_autoload_classname_proj/` | V (A6) | `class_name` matching an autoload name → fatal "hides an autoload singleton" — needs a project |
+| `repro_threaded_proj/` | VI (RL26) | `await load_threaded_request` returns an Error int, not the resource — needs a project |
+| `repro_batch_tick_proj/` | IV (D8) | per-Node `_physics_process` vs one manager loop, N=5000 — needs a frame loop |
 
 The two `repro_*` scripts are how the Part I version-status table's "Re-tested
 4.8.dev" column was filled — re-run them on your own target before trusting any

@@ -462,6 +462,18 @@ overhead × N. One manager iterating once per tick is faster *and* composes
 cleanly with existence-based filtering — the dead and the distant aren't even
 in the loop.
 
+**4.8.dev: measured** (`repro_batch_tick_proj/`). 5000 nodes doing identical
+per-entity work, self-ticking via their own `_physics_process` vs disabled and
+driven by one manager loop: the per-Node form ran **~1.15–1.19× slower per physics
+frame** (≈2.5 ms vs ≈2.1 ms). The gap is the engine's per-callback bookkeeping
+(it walks the tree and invokes `_physics_process` on each node individually);
+collapsing that into a single `for` over a manager-owned array removes it, and the
+gap grows with entity count. **In plain terms:** asking the engine to call 5000
+separate functions every frame costs more than calling one function that does the
+5000 things itself — same work, far fewer hand-offs. Modest at this size; it's the
+kind of win that matters at thousands of entities, not dozens (see the ROI note
+below).
+
 ```gdscript
 class_name EnemyManager extends Node
 

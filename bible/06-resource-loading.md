@@ -339,7 +339,15 @@ A handful of smaller rules that don't justify a section each:
   `load()`, it's the same shape error as the `exists()` antipattern in §4.
 - **Don't `await ResourceLoader.load_threaded_request(...)`** — it's not a
   coroutine. The threaded API is poll-based: request, poll status, get when
-  loaded. `await`-ing it returns null and corrupts your async flow.
+  loaded. **4.8.dev: confirmed** (`tests/repro_threaded_proj/` → RL26) — `await
+  load_threaded_request(p)` returns an **`int`** (`typeof == TYPE_INT`, the `Error`
+  code), not the resource; the poll-then-`load_threaded_get(p)` flow returns the
+  actual `Resource`. **In plain terms:** `await` only suspends on a signal or a
+  real coroutine; hand it a plain value and it just gives that value straight back.
+  `load_threaded_request` returns an error code immediately, so `await`-ing it
+  "succeeds" instantly and binds the error code where you expected the resource —
+  silently wrong. Request, poll `load_threaded_get_status` across frames, then
+  `load_threaded_get`.
   [`../rules/type-async.md`](../rules/type-async.md) covers signal and
   `await` traps in detail.
 

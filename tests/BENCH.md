@@ -188,6 +188,19 @@ Both are **correctness/contract** rules, not perf rules — they belong in the s
 "not actually faster" bucket as Part III §5's H13/C3-C14 (the probing *body* in
 H10b would cost more, but a clean typed-vs-untyped param is even).
 
+## Batched tick — D8 (repro_batch_tick_proj/)
+
+Backs Part IV D8. 5000 nodes, identical per-entity work, Godot 4.8.dev, avg over
+~120 physics frames, 3 runs:
+
+| Drive | µs/frame | ratio |
+|---|---|---|
+| per-Node `_physics_process` (each node self-ticks) | ~2.4–2.5 ms | **1.15–1.19×** |
+| one manager loop over a `Array[Ent]` calling `tick()` | ~2.0–2.2 ms | 1.00× |
+
+The per-Node callback bookkeeping is ~15–19% at N=5000 and grows with entity
+count — real at thousands of entities, irrelevant at dozens (frame-budget rule).
+
 ## Promotion criterion
 
 Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:
