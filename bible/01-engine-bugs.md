@@ -12,7 +12,10 @@ Draws from [`../rules/engine-bugs.md`](../rules/engine-bugs.md).
 > The engine moves: re-running the repros found that **C1, C2, and the `.filter()`
 > half of C3 no longer reproduce on 4.8.dev**, while C3's `.map()` half, C7, C14,
 > and C17 are still live (C17 now as a silent partial-load rather than a hang).
-> Where a re-test changed the verdict it's called out inline
+> The lifecycle entries C5, C8, C10, H8, and M9 were re-run and behave as their
+> status claims on 4.8.dev; C6's crash is gone but the coroutine is now silently
+> *dropped* rather than resumed (see its entry). Where a re-test changed or refined
+> the verdict it's called out inline
 > and in the summary table. The table is the fast-path: if your minimum Godot is
 > past the fix-version, drop the workaround; otherwise keep it. **Re-test on your
 > own target** — "fixed on 4.8.dev" is not a promise about 4.7 or 4.9.
@@ -202,7 +205,11 @@ Belt-and-suspenders: check type too (`if target is Enemy`), because instance
 id reuse may resolve to a live object of a different class (§6).
 
 **Issue / status.** [#72629](https://github.com/godotengine/godot/issues/72629).
-**By design** — the validity check is the prescribed pattern. Lint flag: **C5**.
+**By design** — the validity check is the prescribed pattern. **Confirmed on Godot
+4.8.dev** (`tests/repro_async_proj/`): after an `await` that spans the target's
+`free()`, `is_instance_valid(target)` returns `false`, so the guard correctly
+blocks the use-after-free — touching `target.*` without it is the crash. Lint
+flag: **C5**.
 
 ---
 
@@ -415,7 +422,12 @@ but with shorter repros:
   [#83876](https://github.com/godotengine/godot/issues/83876). **Uncertain
   — re-test on target.**
 - **C6** — coroutine resumed after `queue_free`. Fixed ~4.7.
-  [#93608](https://github.com/godotengine/godot/issues/93608).
+  [#93608](https://github.com/godotengine/godot/issues/93608). *4.8.dev: the crash
+  is gone, but the coroutine is **silently dropped** — it does NOT resume to
+  completion. The repro proves this by writing to a `RefCounted` the caller still
+  holds: `resumed` stays `false` (`tests/repro_async_proj/`). So "fixed" means "no
+  longer crashes," not "runs to the end" — don't rely on a coroutine finishing if
+  its owning node may be freed mid-`await`.*
 - **C10** — `super()` in `_init` skipped. Fixed in 4.2.
   [#76938](https://github.com/godotengine/godot/issues/76938). *4.8.dev: confirmed
   fixed — `super()` runs the base ctor (`repro_lifecycle.gd` → C10).*
@@ -455,8 +467,8 @@ disagree, trust the empirical column **for that build only**.
 | C2a | `.make_read_only()` on `static var` | — | Prescribed pattern | **Works** (`is_read_only()` true after) |
 | C3 | typed `.filter()`/`.map()` returns untyped | [#72566](https://github.com/godotengine/godot/issues/72566) | **Live** | **Split**: `.filter()` typed (fixed), `.map()` still untyped |
 | C4 | `Array[T]` covariance | [#83876](https://github.com/godotengine/godot/issues/83876) | **Uncertain** — re-test | — |
-| C5 | `await` on freed object | [#72629](https://github.com/godotengine/godot/issues/72629) | **By design** — validity check is the pattern | — (frame-loop dependent) |
-| C6 | coroutine after `queue_free` | [#93608](https://github.com/godotengine/godot/issues/93608) | **Fixed ~4.7** | — (frame-loop dependent) |
+| C5 | `await` on freed object | [#72629](https://github.com/godotengine/godot/issues/72629) | **By design** — validity check is the pattern | **Confirmed** — `is_instance_valid` false after await; guard works |
+| C6 | coroutine after `queue_free` | [#93608](https://github.com/godotengine/godot/issues/93608) | **Fixed ~4.7** | No crash, but coroutine **silently dropped** (does not resume to completion) |
 | C7 | `RefCounted` circular leak | [#7038](https://github.com/godotengine/godot/issues/7038) | **Live** | **Live** — leaked ~4000 objs / 2000 cycles |
 | C8 | freed-id reuse | [#32383](https://github.com/godotengine/godot/issues/32383) | **By design** — validity + type check | **Confirmed** — `instance_from_id(freed)` → null |
 | C10 | `super()` in `_init` | [#76938](https://github.com/godotengine/godot/issues/76938) | **Fixed 4.2** | **Confirmed fixed** — `super()` runs base ctor |
