@@ -757,7 +757,12 @@ an `enum` — it's an integer the compiler checks, so a typo won't compile. Use
 compare as ints, never silently pass a misspelling.
 
 Reserve `StringName` for string-like ops (concat, prefix match) or engine APIs
-that demand it (`add_to_group`, `Input.is_action_*`).
+that demand it (`add_to_group`, `Input.is_action_*`). And when the choice is
+`StringName` vs plain `String` (not vs an enum) — use `StringName` for
+*identifiers* (compared, looked up, handed to an engine API), `String` for *text*
+you build or display. Measured + the full when-each: [StringName vs
+String](stringname-vs-string.md). Preference order for an identifier: **enum >
+StringName > String**.
 
 The enum wins are layered:
 

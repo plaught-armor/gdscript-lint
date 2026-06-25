@@ -75,6 +75,7 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `bench_dict_access.gd` | I P9 | `d.key` vs `d["key"]` (the #68834 perf gap, fixed 4.4) |
 | `bench_pop_front.gd` | P6 | `pop_front`/`pop_at(0)` drain O(n²) vs `pop_back`/index O(n); sweeps N to pin the frame-budget threshold (#45455) |
 | `bench_dead_removal.gd` | `bible/removing-dead-entities.md` | culling the dead subset: swap-back vs write-cursor compact vs rebuild vs `remove_at`-per-dead. Compact wins mass cull (keeps order); swap-back's O(1) is per-single-removal; `remove_at` is the O(n·k) trap |
+| `bench_stringname.gd` | `bible/stringname-vs-string.md` | StringName vs String for `==` and dict-key lookup (~1.2× each) + the one-time interning cost. Shows the win is modest — mostly correctness + engine-API contract, not raw speed |
 | `autoload_bench_proj/` | III §2 | autoload global-ident call (needs a real project) |
 | `repro_typed_collections.gd` | I (C1/C2/C3/C14/C16) | re-tests const/typed-collection bug status on this build |
 | `repro_lifecycle.gd` | I (C7/C8/C10/H8/M9/C11/C2a + C3.map) | re-tests object-lifecycle bug status |
