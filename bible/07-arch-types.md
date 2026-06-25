@@ -5,6 +5,11 @@ without re-litigating. This part steps back and asks the prior question: **which
 structural paradigm is that skeleton an instance of, and when should you reach
 for a different one?**
 
+**In plain terms:** there are several big-picture ways to organize a game's code,
+and they suit different sizes of game. This part walks through each one, says
+when it earns its keep, and points out where the official guidance and the
+community guidance disagree.
+
 Four paradigms compete for the "how is this game structured at the bones" slot:
 
 1. **Scene-tree composition** — the Godot-native default. Nodes carry data *and*
@@ -27,6 +32,12 @@ with the sources, and they flag — rather than paper over — the places where 
 official docs, the engine lead, and the community teaching resources genuinely
 disagree.
 
+**In plain terms:** stick with Godot's built-in way of doing things until
+something measurably slows down. When it does, the right next step is usually a
+lower-level Godot tool (drawing many copies of one thing at once, or talking
+directly to the rendering/physics engine), not switching to a whole different
+architecture style.
+
 A note on sourcing: this part is less "measured on a build" than Parts I–IV
 (architecture is shape, not a benchmark), and more "what do the primary sources
 actually say." Where a number exists it's cited and version-flagged; where the
@@ -35,6 +46,11 @@ sources conflict, both are cited and the conflict is named.
 ---
 
 ## 1. The Godot-native paradigm: scene-tree composition
+
+**In plain terms:** Godot's built-in way is to build small reusable "scenes"
+(like prefabs) and nest them inside each other to make bigger ones. Save one
+`Coin` scene, drop 300 copies into a level, and changing the original updates
+them all.
 
 A Godot game is a tree of scenes, and each scene is a tree of nodes
 ([nodes_and_scenes](https://docs.godotengine.org/en/stable/getting_started/step_by_step/nodes_and_scenes.html)).
@@ -83,6 +99,11 @@ that cost is a bug.
 
 ### Node vs Resource — the orthogonal axis
 
+**In plain terms:** Godot gives you two kinds of object. A "Node" is something
+active that lives in the scene and can run code every frame. A "Resource" is
+just a chunk of saved data sitting on disk (like a config file). Use Resources
+for things that *are* data; use Nodes for things that *do* stuff.
+
 Not everything should be a Node. "Resources are data containers. They don't do
 anything on their own"
 ([resources](https://docs.godotengine.org/en/stable/tutorials/scripting/resources.html));
@@ -114,6 +135,11 @@ much sooner for physics bodies.
 
 ## 2. Composition vs inheritance — three axes, kept distinct
 
+**In plain terms:** "composition over inheritance" is a popular slogan, but in
+Godot it can mean three totally different things depending on whether you're
+nesting scenes, extending a script, or extending a scene. People talk past each
+other because they're each thinking of a different one of the three.
+
 "Composition over inheritance" is a slogan that means three different mechanical
 things in Godot, and conflating them is the single most common architecture
 confusion. There is **no official "Inheritance vs Composition" doc page** — the
@@ -131,6 +157,11 @@ And one orthogonal choice — **Resource subtype inheritance** — which is the 
 place the docs are unambiguously pro-inheritance.
 
 ### The genuine maintainer-vs-community split
+
+**In plain terms:** the engine's lead developer says Godot leans on inheritance
+on purpose; popular community teachers say the opposite. Both are looking at
+the same node tree and drawing different conclusions — so the disagreement is
+real, not just framing.
 
 Surface this rather than pretend there's consensus:
 
@@ -181,6 +212,11 @@ single inheritance
 
 ### Axis C — Scene inheritance (`.tscn` inherits `.tscn`)
 
+**In plain terms:** you can also have one whole *scene* inherit from another
+scene — keep the parent's layout, override a few children. It shares how things
+are set up, not what they do, and the editor still has long-standing bugs
+around it. Use it only for the narrow "shared skeleton" case.
+
 This is Part V §4d. The docs are explicit about its *limit*: "Scenes can define
 how an extended class initializes, but not what its behavior actually is"
 ([scenes_versus_scripts](https://docs.godotengine.org/en/stable/tutorials/best_practices/scenes_versus_scripts.html))
@@ -213,6 +249,12 @@ in the SceneTree, so the Axis-C footguns don't apply.
 ---
 
 ## 3. Data-oriented design in Godot
+
+**In plain terms:** data-oriented design says: programs are mostly about turning
+data into other data, so design the data first and write small functions that
+transform it. The classic speed win comes from packing data so the CPU can read
+it fast — but GDScript wraps everything in a generic box, so most of that
+hardware win doesn't reach your scripts. The *shape* benefits still do.
 
 DOD's thesis (Mike Acton, CppCon 2014): "the purpose of all programs… is to
 transform data from one form to another"; the *three lies* are that software is
@@ -265,6 +307,11 @@ without C++ cache locality:
 
 ### DOD is not ECS
 
+**In plain terms:** data-oriented design is a way of *thinking*; ECS is one
+specific framework that implements it. You can absolutely follow data-oriented
+design with plain arrays and a manager script — no ECS library required. The
+two often get treated as the same thing; they aren't.
+
 A misconception worth killing: "structuring something in a data-oriented way
 could very well mean using AoS or any other data structure that fits the problem
 — [it] is not as much about a specific design pattern or optimizing for CPU
@@ -298,6 +345,12 @@ refactor is moving a needle that isn't the bottleneck.
 ---
 
 ## 4. Entity-Component-System (ECS)
+
+**In plain terms:** ECS is a particular architecture where every game thing is
+just an ID number, its data lives in big parallel tables (one column per kind
+of data), and the game logic is a set of routines that scan those tables. Done
+right, it's extremely fast at scale. It's also a whole-project commitment, not
+something you sprinkle into one feature.
 
 ECS makes entities into IDs, components into columnar (struct-of-arrays)
 storage, and behavior into systems that query and iterate. Mertens'
@@ -338,6 +391,12 @@ at scale — its value is decoupling, not throughput.
 
 ### When ECS pays — and when it's the wrong call
 
+**In plain terms:** ECS shines for huge crowd-style games — thousands of
+soldiers, zombies, units — and is overkill for puzzle games, platformers, or
+UI-heavy apps. Even shipped games using ECS report that it can backfire when
+your entities are too varied or change shape often, so the picture isn't all
+upside.
+
 Unity's DOTS rationale is the clearest external "when" (the cases generalize):
 large static environments, competitive multiplayer with prediction, and
 "high-performance massive scale" — RTS crowds, zombie hordes, heavy sim; and the
@@ -360,6 +419,12 @@ hit different workloads.**
 
 ## 5. The escalation ladder (and the measured thresholds)
 
+**In plain terms:** don't pick your architecture up front. Start with the
+default scene tree; if it gets slow, climb one rung at a time — batch processing
+in a manager, then draw many copies at once, then talk to the engine's internal
+servers directly. Each rung gives up a convenience and buys more headroom.
+Most games never leave the bottom two rungs.
+
 The decision is not "OOP or DOD or ECS" picked up front. It's a ladder you climb
 *only when a profiler points at the rung you're on*. Each rung trades engine
 convenience (Inspector, `print_tree`, per-instance culling, collision) for
@@ -375,6 +440,11 @@ throughput.
 
 The measured break-down points (version-flagged; most are single-machine, not
 lab-controlled — treat as order-of-magnitude):
+
+**In plain terms:** here are the rough numbers where each tier stops keeping up.
+Treat them as "this is roughly where things slow down," not exact limits —
+they depend on what kind of node, what physics engine, and what the work
+actually is.
 
 - **Per-node processing falls off in the low thousands.** A C# repro: 5,000
   nodes self-`_Process` ran 200 FPS vs 2,800 FPS manually iterating the same work

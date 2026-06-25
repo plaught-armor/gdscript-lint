@@ -27,6 +27,12 @@ Draws from [`../rules/engine-bugs.md`](../rules/engine-bugs.md).
 
 ## 1. `const Packed*Array` reports byte-count size, reads 0.0
 
+**In plain terms:** Godot has special "packed" array types (tight rows of plain
+numbers) that are faster than the general-purpose array. If you mark one as
+`const`, an old bug makes it report its size in *bytes* instead of *elements*,
+and you read zeros back. The fix is simple: don't use `const` for these — use a
+regular `var`.
+
 **Symptom.** A `const`-declared typed `Packed*Array` (or an array of them)
 reports its length as the byte-count of the underlying buffer and yields zeros
 on read. The values you wrote at declaration are gone.
@@ -73,6 +79,12 @@ literal, not a constructor wrapper → **S6b**). Lint flag: **C1**.
 
 ## 2. `const` arrays/dicts are shared mutable references
 
+**In plain terms:** marking a list or dictionary as `const` only locks the
+*label*, not the *contents*. Anyone who reaches inside and changes an entry
+changes it for *everyone* using that "constant" — including across scene
+reloads. Treat constant containers as read-only by hand, or copy them before
+editing.
+
 **Symptom.** `const` on an `Array` or `Dictionary` binds the *reference*, not
 the contents. Two callers that mutate the same `const` see each other's writes;
 the mutation outlives the call and survives across scene reloads.
@@ -107,6 +119,11 @@ but on 4.8.dev a violation is caught, not hidden. Lint flag: **C2**.
 
 ## 3. Lock class-shared containers with `.make_read_only()`
 
+**In plain terms:** for tables that *everyone* in the program reads, ask the
+engine to lock them after you finish filling them in. Any later attempt to
+change one will fail loudly with an error, instead of quietly corrupting the
+table for every other reader.
+
 The `static var` form admits the §2 shared-mutability bug. `.make_read_only()`
 is the engine's enforcement layer: subsequent mutations raise `"Array is in
 read-only state"`; reads work; the call is idempotent (`.is_read_only()` to
@@ -133,6 +150,12 @@ engine guarantee.
 ---
 
 ## 4. Typed `.filter()` / `.map()` return untyped `Array`
+
+**In plain terms:** you'd expect filtering or transforming a typed list to give
+you back a typed list of the same kind. It doesn't — the result is a generic
+list, and trying to drop it straight into a typed slot blows up or silently
+loses the type. Use the dedicated `.assign()` method to copy the result into
+your typed list.
 
 **Symptom.** Calling `.filter()` or `.map()` on an `Array[T]` returns a
 *plain* `Array`, not an `Array[T]`. Assigning the result to a typed local with
@@ -179,6 +202,11 @@ flag: **C3**.
 
 ## 5. `await` on a freed object leaks or crashes
 
+**In plain terms:** `await` pauses your function until something happens. While
+you're paused, the object you were waiting on can be deleted. When the code
+resumes, touching that now-dead object crashes the game. Always re-check that
+the object is still alive right after the `await`.
+
 **Symptom.** Awaiting a signal on a Node that gets freed before the signal
 fires either leaks the coroutine frame or crashes the resume site. After
 *any* `await` involving a Node, the Node reference may point at a freed
@@ -217,6 +245,13 @@ flag: **C5**.
 ---
 
 ## 6. Freed-object instance-id reuse
+
+**In plain terms:** every object gets a numeric tag. When you delete an object
+the engine can hand that same tag to a *different* new object. If you held the
+old reference, you might end up calling methods on a stranger — and the usual
+"is this null?" check tells you everything is fine. The fix is to store the
+tag (the integer ID), then re-look-it-up at the moment you actually use it,
+and check the type too.
 
 **Symptom.** Storing a `Node` reference, freeing the Node, then later
 resolving the reference yields a *different live object* that recycled the
@@ -264,6 +299,12 @@ this rule is about refs that *escape* a subtree's lifecycle.
 
 ## 7. RefCounted circular references leak silently
 
+**In plain terms:** these objects clean themselves up when nothing points at
+them anymore. If two of them point at each other, each one is keeping the
+other alive — so neither ever gets cleaned up. There's no warning; memory just
+slowly fills. Break the loop by having one side hold a "weak" reference or an
+ID instead.
+
 **Symptom.** Two `RefCounted` instances each holding a typed ref to the other
 never reach refcount zero. Both objects, plus everything they own, leak for
 the program's lifetime. No error, no warning — only `Performance.OBJECT_COUNT`
@@ -307,6 +348,11 @@ one direction with `weakref()` or an integer id. Lint flag: **C7**.
 
 ## 8. `sort_custom` must be strict `<`
 
+**In plain terms:** when you write a custom sort, your comparison function must
+say "strictly less than" — never "less than or equal." Otherwise the sort can
+spin forever or read past the end of the array. And don't assume equal items
+keep their original order; if order matters between ties, add a tiebreaker.
+
 **Symptom.** A comparator that returns `<=` (or `>=`) instead of `<` (or `>`)
 produces non-deterministic ordering, infinite loops, or out-of-bounds reads on
 some inputs. `Array.sort()` is also **not stable** — equal elements may shuffle.
@@ -340,6 +386,12 @@ behaviour are unchanged). Lint flag: **C11**.
 ---
 
 ## 9. `assert()` is stripped in release
+
+**In plain terms:** `assert()` is a developer-only check — when you build the
+final shipped game, the whole line is *deleted*. If you tucked any real work
+inside it ("check this AND do this"), that work simply doesn't happen for
+players. Reserve `assert` for sanity checks; use a regular `if` for anything
+the game actually needs.
 
 **Symptom.** Code inside `assert()` doesn't run in release builds. Anything
 the assert was load-bearing for — a side effect, a runtime invariant check —
@@ -376,6 +428,12 @@ flag: **C12**.
 ---
 
 ## 10. `.tres ↔ .tscn` preload cycles
+
+**In plain terms:** if a data file points at a scene file and that scene file
+points back at the same data file, the engine gets stuck trying to load both
+at once. It either freezes, silently leaves fields empty, or errors out. The
+fix is to never store the "back-pointing" link as a real reference — derive it
+from a naming rule or a string path so only one direction is hard-wired.
 
 **Symptom.** A `.tres` ext_resources a `PackedScene` that, in turn,
 ext_resources the same `.tres`. The engine attempts to resolve the cycle and
@@ -425,6 +483,10 @@ convention-derived path, never a `PackedScene` ext_resource on a `.tres` the
 
 ## 11. Further criticals — condensed
 
+**In plain terms:** a short list of more bugs that follow the same shape as the
+ones above — each one a brief note on what it is, whether it's fixed, and what
+to do until it is.
+
 The rules file carries a tail of additional criticals worth knowing about
 but with shorter repros:
 
@@ -468,6 +530,10 @@ but with shorter repros:
 ---
 
 ## Version-status summary
+
+**In plain terms:** a one-glance table. Find the bug, check whether the Godot
+version you're targeting already includes the fix, and decide whether you
+still need the workaround.
 
 The fast-path. If your project's minimum Godot is past the fix-version,
 drop the workaround; otherwise, keep it.

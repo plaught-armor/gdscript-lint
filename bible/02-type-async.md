@@ -109,6 +109,11 @@ applied to standard library calls.
 
 ## 2. Typed-collection traps
 
+**In plain terms:** you can write `Array[Enemy]` on a variable, and the line
+looks type-checked — but some built-in operations hand back a plain untyped
+`Array`, and the language quietly accepts the mismatch. The variable says it
+holds typed items; it actually doesn't, and the bug shows up much later.
+
 Static typing covers locals and parameters cleanly. The traps live at the
 collection boundary, where a typed declaration meets a returns-Variant API.
 
@@ -155,6 +160,11 @@ Tracked as [#110659](https://github.com/godotengine/godot/issues/110659). →
 
 ### H10b — Type the container, don't probe it
 
+**In plain terms:** if a function takes a collection, say exactly what's in it
+in the signature — don't take a vague "anything" and then ask "what did I
+actually get?" inside the body. The signature is the contract; checking shapes
+at runtime hides the contract and lets the wrong data through.
+
 When you control both the producer and the consumer of a collection, declare the
 parameter with its full type — `Dictionary[K, V]`, `Array[T]`, `PackedStringArray`,
 typed `Resource` subclass. Don't take `Dictionary`/`Array`/`Variant` "for
@@ -195,6 +205,12 @@ probing. (The probing *body* would cost more; a clean typed param vs a clean
 untyped param is even.)
 
 ### H14 / H14b — No redundant `as` after `is`, no `as` after typed access
+
+**In plain terms:** once you've checked `if x is Enemy`, the compiler already
+knows `x` is an `Enemy` inside that block — writing `(x as Enemy).foo` does the
+same check twice and slows things down. Same idea for typed dictionaries and
+arrays: the value comes out with its type already attached, so an extra cast is
+just paperwork.
 
 `if x is T:` already narrows `x` inside the branch — a follow-up `(x as T).member`
 is a Variant round-trip that produces the type the compiler already had.
@@ -311,6 +327,12 @@ in [`../rules/dod.md`](../rules/dod.md) D10/D10a. **4.8.dev: confirmed** —
 
 ## 3. Lambdas and capture semantics
 
+**In plain terms:** a lambda is a small inline function. Two surprises bite
+people regularly: writing the body inline can confuse the auto-formatter, and
+the way the lambda "remembers" outside variables is different for local ones
+than for object fields — so a counter you increment inside the lambda may not
+actually go up where the caller can see it.
+
 Lambdas are useful in GDScript, but their interaction with the formatter and
 with capture semantics is the source of two reliable foot-guns.
 
@@ -354,6 +376,13 @@ formatter-breakage one.
 
 ### H6 — Capture by-value for locals, by-ref for members
 
+**In plain terms:** when a lambda uses a *local* variable from outside, it
+takes a snapshot of the value at the moment the lambda was created — changes
+inside the lambda never reach back out. When it uses a *field on the object*,
+it goes through the object itself, so changes do stick. To share writable state
+with a lambda, use a field (or a list/dictionary, which the lambda can mutate
+through its reference).
+
 Lambdas capture **locals by value at lambda construction time**, and **members
 by reference through `self`**. This produces a confusing asymmetry: mutating a
 captured local inside the lambda has no effect on the outer local, but mutating
@@ -392,6 +421,12 @@ the outer `local_v` at `0` (captured by value) while `_member_v` becomes `1`
 
 ## 4. `await` and coroutines
 
+**In plain terms:** `await` pauses your function and continues it later — when
+some signal fires. While it's paused, the world keeps moving: the thing you
+were waiting on can be deleted, the scene can change, the signal may never
+come. Most bugs in this section are about code that assumes "the next line
+runs right after" when it really doesn't.
+
 `await` looks like an expression, but it's a control-flow primitive that
 suspends the current function and resumes it on a future signal. Three
 properties of that mechanism produce most of the bugs:
@@ -405,6 +440,12 @@ properties of that mechanism produce most of the bugs:
    on what else is going on in the frame.
 
 ### M1 — No `await` in `_ready()`
+
+**In plain terms:** `_ready()` is the engine's "you're set up now" hook —
+other parts of the game expect it to finish before they keep going. If you
+`await` inside it, the function pauses and the rest of the setup happens
+much later, so anything that depended on "everything's ready after `_ready`"
+silently isn't.
 
 `_ready()` runs once when a node enters the tree. The scene-tree machinery
 assumes it returns synchronously: children's `_ready` is called after the
@@ -445,6 +486,11 @@ caller-driven coroutine, not in `_ready`. → **M1**.
 
 ### M2 — Signal `await` needs a timeout and a validity check
 
+**In plain terms:** if you wait for a signal that never arrives, your function
+just sits there forever. Always race the wait against a stopwatch, and after
+the wait ends, check that whatever you were waiting on still exists before you
+use it — it might have been deleted while you were paused.
+
 A bare `await some_signal` blocks forever if the signal never fires. In gameplay
 code that's almost always a bug waiting to happen — the combat animation
 finishes early, the network packet never arrives, the awaited node gets freed
@@ -469,6 +515,12 @@ Any `await` whose target was a `Node` needs the validity check on the other
 side. → **M2**, cross-refs **C5** in `engine-bugs.md`.
 
 ### M3 — Concurrent coroutine race conditions
+
+**In plain terms:** if two paused functions are both waiting on the same
+signal, when the signal fires they wake up in an order nobody promised. If
+both then try to change the same thing, you get a different result every run.
+Fix it by making one function in charge of the change and having the others
+just watch.
 
 Two coroutines awaiting the same signal do **not** have a guaranteed resume
 order. If both want to act on the same mutable state, you have a race condition
@@ -561,6 +613,11 @@ has run after one `await process_frame` (`ran=true`) (`repro_async2_proj/` → M
 
 ### M8 — `create_tween()` is node-bound
 
+**In plain terms:** a tween is an animation helper. If you make it from the
+node you're animating, deleting the node cleanly stops the animation. If you
+make it from the whole scene instead, it keeps running after the node is gone
+and tries to animate memory that no longer exists.
+
 `create_tween()` on a `Node` creates a tween that's bound to that node's
 lifetime. If the node is freed mid-tween, the tween cleanly stops. This is
 usually what you want; the trap is using `SceneTree.create_tween()` from a node
@@ -631,6 +688,13 @@ nested array's contents.
 
 ## 5. Node method-name collisions
 
+**In plain terms:** Godot's built-in `Node` class already owns a long list of
+method names (`get_name`, `get_path`, `get_owner`, and so on). If you write a
+method on your own node with the same name, you're not extending anything —
+you've quietly replaced what the engine uses internally, and bits of the
+engine that rely on the original will break in places far from where you
+shadowed it.
+
 `Node` has a lot of built-in methods, and shadowing one of them in a subclass
 silently replaces the engine's implementation in a way that may or may not be
 caught depending on the call site. The repeat offenders are `get_owner`,
@@ -663,6 +727,12 @@ engine to drive `@export`, signals, and serialization. Treat the entire
 ---
 
 ## 6. `@onready` and the H9 setter trap
+
+**In plain terms:** `@onready` says "set this variable just before `_ready`
+runs." If the variable has a custom setter (a small function that runs on
+assignment), that setter can fire before other parts of the scene are wired
+up, and reach for something that isn't there yet. Split the work: store the
+raw value first, then apply it once everything is ready.
 
 `@onready var x = …` is sugar for "assign this in `_ready` before the body
 runs." If the variable has a `set` accessor, the assignment runs the setter —
@@ -709,6 +779,12 @@ shape. → **H9**.
 ---
 
 ## 7. Typed math functions in hot paths
+
+**In plain terms:** for common math like clamp/abs/max, GDScript ships two
+versions — a general one that works on any number type, and a specific one
+just for floats (or just for ints). The specific one skips the "what kind of
+number is this?" step, so it's noticeably faster in tight loops. Match the
+suffix (`f` for float, `i` for int) to the type you actually have.
 
 The standard library has typed variants for the common math operations:
 `clampf` / `absf` / `maxf` / `minf` / `floorf` / `ceilf` / `roundf` for `float`;

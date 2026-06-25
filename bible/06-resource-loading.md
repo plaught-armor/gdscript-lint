@@ -22,6 +22,13 @@ Draws from [`../rules/resource-loading.md`](../rules/resource-loading.md).
 
 ## 1. Rule of thumb
 
+**In plain terms:** Godot gives you three ways to bring a file into the game,
+and they bill you at different times. `preload` reads the file the moment the
+script that mentions it loads — great for small things you always need, terrible
+for big things you sometimes need. `load` reads it the first time gameplay asks,
+then hands out the same copy on every subsequent ask. Threaded loading does the
+read on a background thread so the main loop doesn't hitch.
+
 > **Preload constants. Load variables. Thread-load levels.**
 
 Three idioms, three jobs. The choice is almost mechanical once you know what
@@ -53,6 +60,13 @@ The mapping holds even on small projects. The reason to keep a strict
 `preload` budget is not memory — it's boot latency: every preloaded asset
 costs script-load time linearly, and `class_name` makes that cost
 transitively viral.
+
+**In plain terms:** when you mark a script `class_name`, Godot has to fully read
+that script (and everything it `preload`s) before any other script can even
+mention it. So one `preload` deep inside a registry can secretly drag in a whole
+chain of meshes, sounds, and scenes before your game has even started its first
+frame. That's what "viral" means here — a small preload high up in the graph
+pulls everything below it into boot.
 
 ---
 
@@ -101,6 +115,12 @@ still-living node), it stays.
 
 ### Cache modes
 
+**In plain terms:** when you ask for a file, the loader has options for how to
+handle the shared copy: hand back the existing one (the default, almost always
+right), make a fresh independent copy, or refresh the shared copy in place so
+everyone who already had it sees the new contents. Most code only ever needs the
+default; the other modes exist for hot-reload tools and editor importers.
+
 | Mode | Behavior |
 |---|---|
 | `CACHE_MODE_REUSE` (default) | Root + sub-resources pulled from cache if present. Misses load + populate. |
@@ -130,6 +150,12 @@ gameplay code, the default is the right answer.
 ---
 
 ## 3. Don't roll your own cache
+
+**In plain terms:** Godot's loader already remembers what it's already loaded —
+ask for the same file twice, you get the same copy both times. Building your
+own dictionary that maps IDs to loaded scenes is just maintaining a second
+copy of a table the engine is already keeping for you, with extra opportunities
+for the two to drift apart.
 
 ResourceLoader already deduplicates by path. A
 `static var SCENES: Dictionary[int, PackedScene]` populated at boot from
@@ -163,6 +189,12 @@ Either fix removes the parallel table and the parity test that guarded it.
 
 ## 4. Don't `ResourceLoader.exists()` after boot validate
 
+**In plain terms:** if you've already checked at startup that every file your
+game needs is there, checking again every time you load one is wasted work.
+The check belongs at the door, not at every step inside the house. If a file
+goes missing mid-game, the loader will hand back nothing — and your "does it
+exist" check would have told you the same thing.
+
 Boot validate already errors on missing paths. After boot, the only way
 `load()` can return null is asset deletion mid-runtime — at which point a
 redundant `exists()` guard gives the caller the same null they'd get from
@@ -190,6 +222,12 @@ the wrong layer.
 ---
 
 ## 5. Editor-gate expensive validators
+
+**In plain terms:** some startup checks are cheap (does this file exist, is it
+the right type), some are expensive (actually build the scene and walk every
+field). Run the expensive ones only while you're editing the game, where you
+*can* still fix problems. The shipped game has nothing to fix at that point —
+making players wait through those checks every launch buys nothing.
 
 When boot validate instantiates scenes or walks resources (mesh decode,
 texture upload, sub-scene chains), wrap the expensive layer in
@@ -227,6 +265,12 @@ gate.
 ---
 
 ## 6. No bidirectional `.tres ↔ .tscn` ext_resource
+
+**In plain terms:** if a scene file points at a data file and the data file
+also points back at the scene, Godot can get caught in a loop trying to load
+either one — sometimes hanging the editor, sometimes leaving fields half-filled
+at runtime. Pick one direction (scene knows its data) and let the other side
+figure out its scene by naming convention or a string path.
 
 Engine bug C17 ([#98551](https://github.com/godotengine/godot/issues/98551))
 — preload cycles can hang or load partial Resources. Pure GDScript-script
@@ -278,6 +322,13 @@ referenced; it should not reference back. `.tscn`'s and code reach into
 ---
 
 ## 7. UID files (`.uid` sidecars) — commit them
+
+**In plain terms:** every file in a Godot project has a hidden ID number, and
+scenes use the ID — not the file path — to find what they reference. That ID
+lives inside `.tres` and `.tscn` files, but for scripts and shaders it lives in
+a tiny sidecar file ending in `.uid`. If you forget to commit those sidecars,
+anyone who clones your project will find half their references broken; if you
+rename a file *with* its sidecar, everything keeps working.
 
 Every imported resource has a UID; `.tscn` and `.tres` store theirs in the
 header. Godot 4.4+ adds `.uid` sidecar files so scripts and shaders
@@ -354,6 +405,11 @@ A handful of smaller rules that don't justify a section each:
 ---
 
 ## The shape of a healthy resource graph
+
+**In plain terms:** the three takeaways below are the whole part in summary —
+mind where the loading cost lands (boot vs gameplay), remember that "cached"
+just means "shared while someone's holding it," and never let data files and
+scene files point at each other in both directions.
 
 If you take three things from this part:
 

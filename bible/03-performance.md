@@ -13,9 +13,20 @@ scripts in [`../tests/`](../tests/).
 > frame). Under ~10,000 ns of the frame? The dispatch cost is irrelevant — find a
 > different bottleneck.
 
+**In plain terms:** speed work only counts where code actually repeats a lot. A
+single frame at 60 fps gives you about 16.6 million nanoseconds to do everything;
+if a piece of code only eats a few thousand of those, making it faster won't help
+the game feel any better. Before tuning anything, do the back-of-envelope math to
+check the call is even in the running.
+
 ---
 
 ## 0. Hot paths and cold paths
+
+**In plain terms:** "hot" means code that runs over and over each second (every
+frame, or inside a big loop); "cold" means code that runs once in a while (boot,
+loading, a button press). Everything in this chapter is aimed at hot code — for
+cold code, prefer the version that's easiest to read.
 
 Everything in this part only matters on a **hot path**. Knowing which of your code
 is hot — and which isn't — is the single most important optimization skill,
@@ -73,6 +84,11 @@ is in [Part IV §5 (hot/cold data split, D5)](04-data-oriented.md). The through-
 
 ## 1. Dispatch — `match` vs `if/elif` vs a Callable table
 
+**In plain terms:** when you need to pick between several actions based on the
+value of one thing (a kind, a state, a tag), there are three usual ways to write
+it. The numbers below say which one is actually fastest in GDScript — and the
+common assumption ("`match` is the clean fast one") is wrong.
+
 Branching on the value of one discriminator (a type code, enum, tag) is the most
 common dispatch in gameplay code. The conventional choices are `match`, an
 `if/elif` chain, or an `Array[Callable]` "jump table." Measured
@@ -87,6 +103,13 @@ baseline = `Array[Callable]` index = 1.00×, higher = faster):
 | `if/elif` + inline body (no call) | **~2.4×** |
 | `match`, 6 arms, hit the last | **0.41×** |
 | `if/elif`, 6 arms, hit the last | 0.78× |
+
+**In plain terms:** higher is faster. The Callable-table row is set to 1.00 so
+everything else is a multiplier on it. So `match + call` at 0.67× is running about
+two-thirds as fast as the Callable table; `if/elif` with the body inlined at ~2.4×
+is more than twice as fast. The 6-arm rows show what happens when the answer is
+the *last* arm checked — `match` drops to 0.41× (it slows down a lot as the list
+grows), while `if/elif` only drops to 0.78×.
 
 Two findings most people get wrong:
 
@@ -116,6 +139,11 @@ expressiveness is the point. → lint rule **D7b**.
 
 ## 2. Call overhead & indirection
 
+**In plain terms:** every step the engine takes to figure out *which* function to
+run is work on top of the function itself. A direct call is cheap; going through
+an object, a singleton, a name-lookup, or a list of subscribers all add bookkeeping
+on the way in. The table below shows how much each step adds.
+
 Every layer between the call site and the code costs. Measured
 (`bench_dispatch_mechanism.gd`, 600k iters, best-of-7, 3 runs, **Godot 4.8.dev**;
 baseline = a hand-inlined expression = 1.00×, higher = slower). The inline
@@ -136,6 +164,12 @@ scaling, both stable across runs:
 (The autoload row needs a real project with a registered `[autoload]`, so it's
 measured separately — `tests/autoload_bench_proj/` — against the same inline
 baseline.)
+
+**In plain terms:** in this table higher means *slower* (the opposite of §1's
+table) — the inline baseline is 1.00, and ~4.1 means "about four times as long as
+just doing the work right there." So a static helper call costs ~4×, an instance
+method ~5×, an autoload ~6×, a `get_node()` lookup ~10×, and a signal emit with
+four listeners ~23×. Same answer at the end, very different cost to *get* to it.
 
 **In plain terms:** the further the engine has to travel to find the code you want
 to run, the more it costs. Inlining the work is free — there's nothing to find. A
@@ -165,6 +199,12 @@ Takeaways:
 
 ## 3. Loops — three idioms, two of them folklore
 
+**In plain terms:** three common pieces of loop advice turn out to be wrong, half
+wrong, or backwards once benchmarked. Iterate over a list directly (don't index
+into it by counter); when counting *down*, use `range(hi, lo, -1)` (the "use a
+while loop instead" advice is the slow one); and `for i in N` vs `range(N)` is a
+toss-up — pick whichever reads better.
+
 Measured `bench_loop_idiom.gd`, N = 2,000,000, best-of-7, **Godot 4.8.dev**:
 
 | Idiom | A | B | A/B | verdict |
@@ -187,6 +227,11 @@ Measured `bench_loop_idiom.gd`, N = 2,000,000, best-of-7, **Godot 4.8.dev**:
 
 ## 4. Typed math functions
 
+**In plain terms:** Godot has two flavors of common math helpers — the generic
+`clamp`/`abs`/`max` that work on anything, and the type-specific `clampf`/`absf`/
+`maxf` (for floats) and `clampi`/`absi`/`maxi` (for ints). The typed ones skip
+the engine's "what type is this?" check and run noticeably faster in a tight loop.
+
 The `*f`/`*i` variants (`clampf`, `absf`, `maxf`, `clampi`, …) skip Variant
 dispatch. Measured (`bench_candidate_rules.gd`, N = 2M, best-of-5, Godot 4.8.dev):
 
@@ -202,6 +247,11 @@ linter can't always tell, so this is **advisory**. Hard rule in
 ---
 
 ## 5. Static typing & the things that are *not* faster
+
+**In plain terms:** annotating your variables with types (`var x: int = 0` instead
+of `var x = 0`) is the single biggest performance win in GDScript — but it's
+smaller than the often-quoted "40–47% faster," and a few related claims (`:=` is
+slower, typed array iteration is faster) don't actually hold up.
 
 Static typing itself is the biggest single win — but measure it before quoting a
 number. The folklore figure is "~40–47% faster"; on this build, an int-arithmetic
@@ -243,6 +293,10 @@ perf-motivated rules that didn't measure up (L1/L2/L3/P22) are **advisory**.
 ---
 
 ## The folklore, overturned
+
+**In plain terms:** three pieces of advice you'll see repeated online turn out to
+be wrong on this engine version. The list below is the short "if you only
+remember this much" version.
 
 If you take three things from this part:
 

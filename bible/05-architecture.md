@@ -12,9 +12,19 @@ prescription. The closing section names the cases where you should break it.
 
 Draws from [`../rules/architecture.md`](../rules/architecture.md).
 
+**In plain terms:** this part is a starter floor plan for a Godot project. It
+says where each kind of file goes, which globals every project ends up needing,
+and what to name things — so you stop re-deciding the same questions on every
+new project.
+
 ---
 
 ## 1. Directory layout
+
+**In plain terms:** a fixed set of folders, each with one job. Data files
+(designer-tunable) sit in `resources/`; code sits in `scripts/`; scenes sit in
+`scenes/`. Keeping data and code in separate folders prevents the cyclic
+references that cause some nasty engine bugs.
 
 ```
 project_root/
@@ -66,6 +76,13 @@ The two domain dirs that occasionally trip people up:
 
 ## 2. Canonical autoloads, and the ones that aren't autoloads
 
+**In plain terms:** most projects need a handful of "always-available"
+helpers — a sound hub, a save system, a place to keep collision-layer numbers.
+Some of them need to remember things (so they're proper objects that live in
+the scene tree); others are just bundles of helper functions and constants (so
+they don't need to be loaded as objects at all). Pick the heavier kind only
+when you actually need memory or signals.
+
 Every Godot project of nontrivial size grows the same four globals. They split
 along one axis: **does this need state?**
 
@@ -96,6 +113,11 @@ demoting an autoload to static-only — almost never happens, because once a
 signal exists, removing it is a refactor across every subscriber.
 
 ### 2a. Autoload scripts must NOT declare `class_name`
+
+**In plain terms:** if you've already given a script a global nickname by
+registering it as an autoload, don't also give it the same nickname via
+`class_name` — that's claiming the same name twice, and the engine refuses to
+start the script at all.
 
 This is the most common autoload mistake, and the engine error message isn't
 obvious until you've seen it once.
@@ -133,6 +155,11 @@ no `class_name`.
 
 ## 3. Naming by kind
 
+**In plain terms:** the language doesn't tell you at a glance whether a file
+holds data, holds behavior, or runs the game. So tack on a small suffix
+(`Def`, `Record`, `System`, `Manager`, `HUD`) and you can tell each file's job
+just by reading its name.
+
 GDScript has no marker that says "this class is a POD record" vs "this class is
 a stateless system" — the type system doesn't distinguish. A suffix convention
 recovers that distinction and gives every file an immediate, scannable role.
@@ -166,11 +193,22 @@ Two non-obvious points:
 
 ## 4. Subsystem shape templates
 
+**In plain terms:** four ready-made layouts for the parts every game ends up
+building — a master list of items, a thing that updates lots of enemies at
+once, a HUD wrapper that holds the on-screen widgets, and a base scene that
+other scenes copy from. Copy the shape; fill in the specifics.
+
 These are not abstract patterns — they are the concrete file shapes that the
 rest of this part assumes. Each template carries a label like *(D1 + D11 + C2a)*
 naming the data-oriented and engine-bug rules it satisfies.
 
 ### 4a. Registry (D1 + D11 + C2a)
+
+**In plain terms:** one master list of everything in a category — every
+item, every enemy kind. It's read by every system, so it has to be locked
+down so nothing can accidentally change it, and it has to be checked at
+startup so any missing pieces blow up immediately instead of failing
+silently mid-game.
 
 A registry is a per-domain table: every item in the game, every enemy kind,
 every weapon. The table is shared mutable data at the worst possible scope
@@ -227,6 +265,13 @@ half-loaded registry that silently returns `null` for a missing item is the
 worst possible failure mode, because it surfaces as "potion doesn't heal" at
 3am, not "registry boot failed" at startup.
 
+**In plain terms:** there's a special setup function (`_static_init`) that
+runs once, automatically, when the engine first reads a class's file off
+disk — not when your code later goes to use that class. So if a startup
+script even mentions the class by name, that mention is enough to make the
+engine load the file and run its setup. Classes nobody mentions stay
+unloaded and never run their setup at all.
+
 **Measured (4.8.dev, `tests/repro_static_init_proj/`) — `_static_init` timing is
 subtler than "runs the first time the class is referenced":** it runs when the
 class's script is first *loaded*, and a script's `class_name` dependencies are
@@ -256,6 +301,11 @@ boot, the load-bearing requirement is that *some boot-loaded script names it* �
 the `_ready` body is just a convenient, guaranteed-reachable place to do so.
 
 ### 4b. Manager (batched-tick, D8)
+
+**In plain terms:** instead of every enemy asking the engine "update me"
+every frame, one Manager keeps a list of all the live enemies and updates
+them itself with one loop. Faster than thousands of separate update calls,
+and dead enemies aren't on the list to begin with.
 
 A manager owns the per-frame loop for N entities of one kind. The per-entity
 script does not run `_physics_process` — the manager does, once, over its
@@ -289,6 +339,11 @@ If instead you register it in `[autoload]`, **drop the `class_name`** (autoload
 name collides with it — see §2a) and access it by the autoload name.
 
 ### 4c. HUD facade (M11 + M12)
+
+**In plain terms:** instead of every gameplay system reaching directly into
+each on-screen widget (health bar, reticle, menu), give it one `HUD` object
+that holds them all. Other systems talk to the HUD; the HUD talks to its
+widgets. One door instead of ten.
 
 A HUD on a nontrivial game grows five to ten widgets, each one wanting a
 reference to the player, the camera rig, the camera. Wiring every controller
@@ -327,6 +382,11 @@ that needs three widgets doesn't import three widget classes — it imports
 
 ### 4d. Pickup scene — scene inheritance
 
+**In plain terms:** when ten item-pickup scenes are nearly identical,
+make one "base" scene with the shared parts and have the others inherit
+from it. Each variant only sets the few things that differ (the model,
+the data file). Edit the base once; all variants update.
+
 When N scenes share a root setup (script + collision layer/mask + skeleton
 children), extract a base `.tscn` and use `instance=ExtResource(base)` in the
 derived scenes. The derived scenes override only the per-instance delta.
@@ -347,6 +407,10 @@ depend on by name.
 ---
 
 ## 5. The decision rubric
+
+**In plain terms:** a one-line cheat sheet for the small choices that come up
+again and again. Pick the default in the table unless you have a specific
+reason not to; each row points back at the rule that explains why.
 
 The shapes above answer the common questions structurally. The table below
 answers them one at a time — what to default to when the question first comes
@@ -380,6 +444,12 @@ genuine reasons to deviate.
 ---
 
 ## 6. Boot order
+
+**In plain terms:** the always-available helpers load in the order listed in
+the project file, and that order matters when one of them depends on another.
+Load the master lists first, then save/load (which uses them), then the
+sound hub. If anything is wrong, crash the game right there at startup
+instead of limping along.
 
 `autoloads/` load in `project.godot` order. Order matters when one autoload
 references another:
@@ -420,6 +490,11 @@ precondition for boot-time validation. See `tests/repro_static_init_proj/`.
 
 ## 7. When to break the skeleton
 
+**In plain terms:** the layout above is the starting default, not a law. A
+tiny tool, a game jam entry, or a genuinely unusual project gets to ignore
+it. Wait until the same exception shows up on two or three projects before
+you decide it's a new rule.
+
 The skeleton is the *default*, not the prescription. Break it when:
 
 - **One-shot tool or level editor.** A jam game or a procgen testbed doesn't
@@ -444,6 +519,10 @@ the second instance," not "predict where the abstraction will land."
 ---
 
 ## The shape, in one paragraph
+
+**In plain terms:** the whole chapter, boiled down — where files go, what
+to name them, which globals are full objects vs. just bundles of functions,
+and which one-paragraph rule covers each common decision.
 
 Data is `.tres` under `resources/` and a `Def` `Resource` class under
 `scripts/data/`. Behavior is a `static func` on a `System` `RefCounted` under
