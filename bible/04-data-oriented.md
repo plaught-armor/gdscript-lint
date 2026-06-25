@@ -9,8 +9,9 @@ output — see the worked examples: [combat](dod-by-example.md) (D1–D8 + P6 + 
 swap-back/cull), [perception](dod-perception-example.md) (existence-based state +
 the corrected D8), [inventory](dod-inventory-example.md) (D11 — one table, no
 mirrors), [object pool](dod-pool-example.md) (P21 free-list + slot reuse),
-[spatial hash](dod-spatial-example.md) (neighbor queries that do less), and
-[save/load](dod-save-example.md) (relational POD, ids not objects).
+[spatial hash](dod-spatial-example.md) (neighbor queries that do less),
+[save/load](dod-save-example.md) (relational POD, ids not objects), and
+[stat/upgrade](dod-upgrade-example.md) (modifier transform + authoring-equivalence test).
 
 ---
 

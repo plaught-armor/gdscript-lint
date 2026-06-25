@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="WeaponDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://weapon_def.gd" id="1_def"]
+
+[resource]
+script = ExtResource("1_def")
+damage = 10.0
+attack_speed = 1.0
+crit_chance = 0.05

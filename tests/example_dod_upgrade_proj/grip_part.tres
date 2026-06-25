@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="WeaponPartDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://weapon_part_def.gd" id="1_part"]
+
+[resource]
+script = ExtResource("1_part")
+flat_damage = 5.0
+increased_damage = 0.5
+more_damage = 0.2
+flat_attack_speed = 0.2
