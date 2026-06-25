@@ -93,7 +93,8 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `repro_static_init_proj/` | V (§4a/§6) | `_static_init` fires at script-LOAD (before `_ready`), only for *reachable* `class_name` classes, exactly once; `make_read_only` lock + `NONE` sentinel hold. **Import first** (`--import`) then run `--path` — uses `class_name` globals |
 | `example_dod_combat_proj/` | bible `dod-by-example.md` | runnable worked example — an enemy-combat subsystem composing D1/D4/D5 (EnemyDef + SoA arrays), D2+P6 (existence + swap-back death), D3 (id refs), D6 (pure CombatSystem), D7 (armor table), D8 (batched tick). **Import first**, then run `--path` — prints the traced wave |
 | `repro_threaded_proj/` | VI (RL26) | `await load_threaded_request` returns an Error int, not the resource — needs a project |
-| `repro_batch_tick_proj/` | IV (D8) | per-Node `_physics_process` vs one manager loop, N=5000 — needs a frame loop |
+| `repro_batch_tick_proj/` | IV (D8) | **SUPERSEDED** — toggle-in-one-scene measurement with an A/B-ordering bias; kept as a cautionary artifact. Use the bench below |
+| `bench_process_centralization_proj/` | IV (D8) | ordering-controlled centralization sweep (per-node vs manager-of-nodes vs few-managers vs inline SoA), N×W matrix. Finds manager-of-nodes ~2× **slower** than per-node; inline SoA the only dispatch win. **Import first**, then `--path` |
 
 The two `repro_*` scripts are how the Part I version-status table's "Re-tested
 4.8.dev" column was filled — re-run them on your own target before trusting any

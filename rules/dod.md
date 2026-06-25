@@ -208,10 +208,13 @@ Plain param/local subjects need no hoist — compare directly. Don't alias a par
 
 ## D8 — Batched homogeneous processing > per-Node tick
 
-N entities of one kind running `_physics_process` pays per-Node overhead × N. One manager iterating once per tick is faster *and* composes with existence-based filtering (skip dead, skip distant) before the inner loop.
+**Measured correction (4.8.dev, `bench_process_centralization_proj/`):** a manager looping nodes and calling `e.tick()` per entity is **~2× SLOWER** than per-node `_physics_process` — a GDScript method call (D9 ~5.3× tier) costs more than the engine's native callback, and the loop adds array overhead. Centralizing the *call* is a loss, not a win. The dispatch win exists **only for inline SoA**: a manager owning `Packed*Array`s and working them in a flat loop with **no per-entity calls** (~2.3× faster at light work, tapering to parity as work grows). "One vs a few" managers: no difference.
 
-- `EnemyManager` autoload or scene-root owns `Array[Enemy]`, drives via `for e in alive: e.tick(delta)`. Per-instance `set_physics_process(false)` in `_ready`.
-- Pairs with D2: manager iterates alive set once/frame; dead aren't in loop. **Don't call `get_nodes_in_group(&"alive")` inside the per-frame loop** — alloc per call. Cache in manager-side `Array[T]`, refresh via signals.
+So a manager-of-Nodes earns its keep by **doing less**, not by cheaper dispatch:
+
+- `EnemyManager` scene-root/autoload owns `Array[Enemy]`, `for e in alive: e.tick(delta)`, per-instance `set_physics_process(false)`. This is **not** a speed-up over self-ticking — its value is the *control* it enables (below).
+- Pairs with D2: iterate the alive set once/frame; dead/distant aren't in the loop at all — skip + LOD (split `_alive_near`/`_alive_far`, tick far every Nth frame). **The work that doesn't happen is the win.** Don't call `get_nodes_in_group(&"alive")` in the loop — alloc per call; cache `Array[T]`, refresh via signals.
+- For the *dispatch* win, go full SoA (flat arrays, no per-entity Node) — see the worked example's `EnemyManager.tick()`.
 - ROI only at N × per-frame cost large enough. Don't refactor 5 enemies.
 
 ## D9 — Static-on-RefCounted vs autoload Node

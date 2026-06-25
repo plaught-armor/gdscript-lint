@@ -1,9 +1,15 @@
 # gdlint: disable-file
 extends Node
-## Empirically tests Part IV D8: N entities each running their own _physics_process
-## vs one manager iterating an Array and calling tick() on each. Measures average
-## physics-frame time in two phases (same per-entity work both ways).
-## Runs as project main scene: godot --headless --path tests/repro_batch_tick_proj
+## SUPERSEDED — kept as a cautionary artifact. Measures D8 by TOGGLING modes within
+## one scene (per-node phase first, manager phase second, same long-lived nodes),
+## which carries an A/B-ordering bias: a warming CPU makes the later phase look
+## faster, inflating a false "manager-of-nodes is faster" verdict (~1.07-1.19x). The
+## ordering-controlled, trial-isolated bench_process_centralization_proj/ reverses
+## it: a manager looping nodes calling e.tick() is ~2x SLOWER than per-node; the real
+## win is inline SoA. See tests/BENCH.md "process centralization". Use that, not this.
+##
+## (original) Tests D8: N entities self-_physics_process vs one manager iterating an
+## Array calling tick(). Runs: godot --headless --path tests/repro_batch_tick_proj
 
 const N: int = 5000
 const WORK: int = 40 # inner work per entity, so the callback cost is visible

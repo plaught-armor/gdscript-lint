@@ -188,18 +188,49 @@ Both are **correctness/contract** rules, not perf rules — they belong in the s
 "not actually faster" bucket as Part III §5's H13/C3-C14 (the probing *body* in
 H10b would cost more, but a clean typed-vs-untyped param is even).
 
-## Batched tick — D8 (repro_batch_tick_proj/)
+## Batched tick / process centralization — D8 (bench_process_centralization_proj/)
 
-Backs Part IV D8. 5000 nodes, identical per-entity work, Godot 4.8.dev, avg over
-~120 physics frames, 3 runs:
+Backs Part IV D8 — and **corrects** the earlier claim. The question: is it faster
+to centralize per-frame work into one (or a few) systems than to let N nodes each
+run their own `_physics_process`? Four layouts, swept over entity count N and
+per-entity work W (W=0 isolates pure dispatch; W=30 is realistic light work).
+Godot 4.8.dev, ~80 physics frames/trial, **independent trials, ordering-bias-
+controlled** (per-node measured *last*, so a warming CPU disadvantages it — yet it
+still wins; the manager-of-nodes verdict is therefore not an ordering artifact):
 
-| Drive | µs/frame | ratio |
+baseline = per-node `_physics_process` = 1.00× (higher = faster than per-node):
+
+| Layout | W=0 (pure dispatch) | W=30 (light work) |
 |---|---|---|
-| per-Node `_physics_process` (each node self-ticks) | ~2.4–2.5 ms | **1.15–1.19×** |
-| one manager loop over a `Array[Ent]` calling `tick()` | ~2.0–2.2 ms | 1.00× |
+| per-node `_physics_process` | 1.00× | 1.00× |
+| one manager loops `Array[Ent]` calling `e.tick()` | **0.46–0.48×** | 0.47–0.50× |
+| four managers, each loops N/4 | 0.46–0.48× | 0.50–0.52× |
+| **inline manager** — flat `PackedInt32Array`, no per-entity calls | **2.2–2.3×** | 1.04–1.15× |
 
-The per-Node callback bookkeeping is ~15–19% at N=5000 and grows with entity
-count — real at thousands of entities, irrelevant at dozens (frame-budget rule).
+Three findings, stable across runs at N ∈ {1000, 10000}:
+
+1. **A manager that loops nodes calling `e.tick()` is ~2× SLOWER than per-node.**
+   A GDScript per-entity method call (`e.tick()`, the ~5.3×-inline instance-method
+   tier in §2's ladder) costs *more* than the engine's native `_physics_process`
+   dispatch. You still pay N calls either way — and the loop adds array iteration
+   on top. Centralizing the *call* buys nothing; it loses.
+2. **The win requires eliminating the per-entity call.** The inline manager owns a
+   flat array and works it in place — there are **no N method calls at all**, just
+   array math. That's 2.2–2.3× faster than per-node when work is light (dispatch is
+   the whole cost), shrinking toward parity as per-entity work grows and dominates.
+3. **"One" vs "a few" systems: no difference.** Four managers ≈ one manager.
+
+**Correction to the prior recording.** An earlier toggle-in-one-scene repro
+(`repro_batch_tick_proj/`) reported the manager-of-nodes form as a slight *win*
+(1.07–1.19×). That harness measured the per-node phase first and the manager phase
+second on the same long-lived nodes — an A/B ordering bias (CPU warms over a run →
+the later phase looks faster) compounded by the measuring node *being* the manager.
+The trial-isolated bench here removes both confounds and reverses the verdict.
+Neither harness supports "manager-of-nodes is faster"; the robust, defensible
+conclusion is: **per-entity method dispatch is not cheaper in a loop — the manager
+earns its keep by doing *less* (existence-based skipping of dead/distant entities,
+lower tick rate) or by going full SoA (flat data, no per-entity calls), not by
+replacing N callbacks with N method calls.**
 
 ## P6 — Array front-removal is O(n), drain loop is O(n²) (bench_pop_front.gd)
 

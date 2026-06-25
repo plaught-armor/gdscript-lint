@@ -596,62 +596,81 @@ loud (or a boot-time validator), exactly as you'd keep `match`'s `_:` arm.
 
 ## 7. Batched homogeneous processing over per-Node ticks (D8)
 
-**In plain terms:** instead of 5000 enemies each asking the engine to call their
-own update function every frame, have *one* manager loop over a list and update
-them itself. Same work, far fewer engine hand-offs — and the dead and the
-distant simply aren't in the list to begin with.
+**In plain terms:** the instinct is "one manager looping the entities must beat N
+entities each ticking themselves." Measured, that's only true if the manager
+stops calling a *method per entity* — a GDScript method call costs about as much
+as the engine's own per-node callback, so looping and calling `e.tick()` buys
+nothing and loses to the array overhead. The real win is twofold: tick *fewer*
+things (skip the dead and distant), and where it's hot, work *flat data* in one
+pass instead of calling N objects.
 
-One manager iterating once per tick beats N entities each running
-`_physics_process`, and it composes cleanly with existence-based filtering (§2).
+**4.8.dev: measured, and it overturns the naive claim**
+(`bench_process_centralization_proj/`, ordering-bias-controlled; full table +
+correction note in `tests/BENCH.md`). Baseline = per-node `_physics_process` =
+1.00× (higher = faster):
 
-**4.8.dev: measured** (`repro_batch_tick_proj/`). 5000 nodes doing identical
-per-entity work, self-ticking via their own `_physics_process` vs disabled and
-driven by one manager loop: the per-Node form ran **~1.15–1.19× slower per physics
-frame** (≈2.5 ms vs ≈2.1 ms). The gap is the engine's per-callback bookkeeping
-(it walks the tree and invokes `_physics_process` on each node individually);
-collapsing that into a single `for` over a manager-owned array removes it, and the
-gap grows with entity count. Modest at this size; the kind of win that matters at
-thousands of entities, not dozens (see the ROI note below).
+| Layout | W=0 (pure dispatch) | W=30 (light work) |
+|---|---|---|
+| per-node `_physics_process` | 1.00× | 1.00× |
+| one (or four) managers looping nodes, calling `e.tick()` | **~0.47×** | ~0.50× |
+| **inline manager** — flat `PackedInt32Array`, no per-entity calls | **~2.3×** | ~1.1× |
+
+Two surprises:
+
+- **A manager looping nodes and calling `e.tick()` per entity is ~2× SLOWER than
+  letting them self-process.** A GDScript instance-method call is the
+  ~5.3×-inline tier of §8's ladder; the engine's native `_physics_process`
+  dispatch is cheaper. You pay N calls either way, and the loop adds array
+  iteration on top. (This corrects an earlier toggle-in-one-scene repro that
+  reported a slight manager *win* — an A/B-ordering artifact; see BENCH.md.)
+- **Eliminating the per-entity call is the win.** An inline manager that owns a
+  flat array and works it in place — no `Enemy` objects, no `e.tick()` — runs
+  2.3× faster than per-node when work is light (dispatch is the whole cost),
+  tapering toward parity as per-entity work grows. "One vs a few" managers: no
+  difference.
+
+So D8 is really two claims, and only one is about dispatch speed. The fast form
+is **SoA**, the shape §4 already pushes: state in manager-owned `Packed*Array`s,
+the tick a flat loop over indices with no per-slot method call (the worked
+example's `EnemyManager.tick()` is exactly this). The form below — a manager
+looping `Enemy` nodes — does **not** win on dispatch:
 
 ```gdscript
 class_name EnemyManager extends Node
 
 var _alive: Array[Enemy] = []           # cache, refreshed via group signals
 
-func _ready() -> void:
-    get_tree().node_added_to_group.connect(_on_added)
-    get_tree().node_removed_from_group.connect(_on_removed)
-
 func _physics_process(delta: float) -> void:
     for e: Enemy in _alive:             # typed for (H2)
-        e.tick(delta)
+        e.tick(delta)                   # ← a method call per entity: measured
+                                        #   ~2× SLOWER than per-node, not faster
 ```
 
-Each enemy `set_physics_process(false)` in `_ready`. The Manager owns the
-loop; the enemy owns the per-instance state.
-
-The pairing with §2 is the point. The manager iterates the alive *set* once
-per frame; dead enemies aren't there to be skipped. Distant enemies aren't
-there if you split into `_alive_near` and `_alive_far` and tick the far group
-at a lower rate. The work that doesn't happen is the cheapest work in the
-program.
+Its value is **not** dispatch speed — it's the control §2 buys. `_alive` already
+excludes the dead, and you can split `_alive_near` / `_alive_far` and tick the
+far group every Nth frame. **The work that doesn't happen is the cheapest work in
+the program** — and *that*, not a cheaper loop, is why a manager earns its keep
+while the entities stay Nodes. Each enemy `set_physics_process(false)` in `_ready`
+so only the manager drives them: necessary for the control, even though the loop
+itself isn't the speed-up. If you need the dispatch win too, drop the per-entity
+Node and go SoA.
 
 Two things to watch:
 
 - **Don't call `get_nodes_in_group(&"alive")` inside the per-frame loop.** It
   allocates a fresh array on every call (D2a). Cache the typed `Array[Enemy]`
   on the manager and refresh it on the two edge signals.
-- **ROI only at N × per-frame-cost large enough to measure.** Don't refactor
-  five enemies. Part III's frame-budget heuristic applies:
-  `(call cost ns) × (calls/sec)` vs `16,600,000 ns` (one 60 fps frame). Under
-  ~10,000 ns of frame budget? The batching is irrelevant — find a different
-  bottleneck.
+- **The dispatch win is in SoA, not the loop.** Don't reach for a manager-of-nodes
+  *for speed* — it's a loss. Reach for it for control (skip/LOD), or go full SoA
+  for the speed. And measure first: Part III's heuristic, `(call cost ns) ×
+  (calls/sec)` vs `16,600,000 ns` (one 60 fps frame); under ~10,000 ns of frame
+  budget, none of this is your bottleneck.
 
-The shape also makes higher-level moves possible. The Manager can sort
-`_alive` by distance once per second and only deep-tick the first N. It can
-split into two arrays and tick the far one every other frame. None of that is
-expressible against per-Node `_physics_process`; all of it is one loop's
-distance away once the data is in a manager-owned array.
+The control shape makes higher-level moves possible: sort `_alive` by distance
+once per second and deep-tick only the first N; split into two arrays and tick the
+far one every other frame. None of that is expressible against per-Node
+`_physics_process` — all of it is one loop's distance away once the manager owns
+the set.
 
 ---
 
