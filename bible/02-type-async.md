@@ -185,6 +185,15 @@ The legitimate exceptions are *boundaries*: `JSON.parse_string`
 plugin and reflection code, save-format migration. Convert to typed at the
 boundary; downstream takes the typed form.
 
+**4.8.dev: this is a correctness rule, not a perf one.** Summing a small
+`Dictionary` passed as `Dictionary[String, int]` vs untyped `Dictionary` measured
+**~1.00× (a wash)** at this scale — the function-call and hash-iteration cost
+swamp any element-typing delta (`bench_param_types.gd` → H10b). So don't sell
+H10b on speed; its value is the honest signature — the contract is visible, the
+body can't silently accept the wrong shape, and you skip the `typeof()`/`is`
+probing. (The probing *body* would cost more; a clean typed param vs a clean
+untyped param is even.)
+
 ### H14 / H14b — No redundant `as` after `is`, no `as` after typed access
 
 `if x is T:` already narrows `x` inside the branch — a follow-up `(x as T).member`
@@ -229,6 +238,15 @@ signal hit_landed(target, damage)
 # Good — typed contract, handler stays on the fast path.
 signal hit_landed(target: Enemy, damage: int)
 ```
+
+**4.8.dev: the win is correctness, not emit speed.** Emitting 1M times to a
+handler via a typed-param signal vs an untyped-param signal measured **~1.00×**
+(`bench_param_types.gd` → H4) — the signal-dispatch cost (≈115 ns/emit; see Part
+III §2) dwarfs any param-typing delta, so you won't find it in a benchmark. The
+real reason to type signal params is #110573: a typed signal validates handler
+signatures at `connect` time and documents the payload — a wrong-arity or
+wrong-type handler is caught at the boundary instead of silently receiving a
+mis-shaped Variant. Type them for the contract, not the clock.
 
 ### H7 — Float→int narrowing is silent
 

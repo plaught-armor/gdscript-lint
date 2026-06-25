@@ -174,6 +174,20 @@ best-of-7, 2 runs, Godot 4.8.dev (>1 = the redundant cast is slower):
 
 Modest but real in a hot loop, and free to fix (the cast is pure clutter).
 
+## Param/signal typing — H4/H10b (bench_param_types.gd)
+
+Backs Part II H4 (typed signal params) and H10b (type the container param). N=1M,
+best-of-7, 2 runs, Godot 4.8.dev:
+
+| Case | ratio (untyped / typed) | reading |
+|---|---|---|
+| typed vs untyped signal **param** (H4) | **~1.00×** | wash — emit cost dwarfs it; type for the contract (#110573), not speed |
+| typed vs untyped Dict **param** (H10b) | **~1.00×** | wash at this scale — type for the honest signature, not speed |
+
+Both are **correctness/contract** rules, not perf rules — they belong in the same
+"not actually faster" bucket as Part III §5's H13/C3-C14 (the probing *body* in
+H10b would cost more, but a clean typed-vs-untyped param is even).
+
 ## Promotion criterion
 
 Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:

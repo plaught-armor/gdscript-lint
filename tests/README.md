@@ -82,6 +82,7 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `repro_async2_proj/` | II (M1/M6/M7/M8) | await defers, temp-RefCounted signal lost, `call_deferred` timing, tween on freed node — needs a frame loop |
 | `bench_redundant_cast.gd` | II (H14/H14b) | redundant `as` after `is` / on typed-container access vs direct |
 | `repro_h9_proj/` | II (H9) | `@onready` init bypasses the var's setter (#71372) — needs a scene |
+| `bench_param_types.gd` | II (H4/H10b) | typed vs untyped signal param, typed vs untyped Dict param (both ~wash) |
 
 The two `repro_*` scripts are how the Part I version-status table's "Re-tested
 4.8.dev" column was filled — re-run them on your own target before trusting any
