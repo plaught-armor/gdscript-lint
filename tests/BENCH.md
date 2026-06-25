@@ -232,6 +232,32 @@ earns its keep by doing *less* (existence-based skipping of dead/distant entitie
 lower tick rate) or by going full SoA (flat data, no per-entity calls), not by
 replacing N callbacks with N method calls.**
 
+## Removing dead entities — cull strategies (bench_dead_removal.gd)
+
+Companion to P6: how to remove the *dead subset* from a manager-owned array each
+frame. Four strategies, swept over N and death fraction; "dead" is intrinsic to
+the value so all remove the same set from a fresh copy. µs to cull one pass,
+best-of-9, 4.8.dev:
+
+| N | dead % | swap-back | compact (write-cursor) | rebuild | remove_at per dead |
+|---|---|---|---|---|---|
+| 10,000 | 50% | 485 | **284** | 250 | **1,079** |
+| 10,000 | 5% | 348 | **329** | 289 | 411 |
+| 1,000 | 50% | 47 | **28** | 24 | 43 |
+
+- **Write-cursor `compact` wins** (~1.7× over swap-back at 50% dead) *and* keeps
+  order — one forward pass, each element touched once, one resize at the end.
+- **Swap-back's O(1) is per *single* removal, not per cull.** Culling a fraction
+  re-examines swapped-in elements (often dead → re-swapped) and resizes per
+  removal — slower than one compaction pass. (Single-removal-by-index, like the
+  combat example's `kill(slot)`, is still correctly swap-back.)
+- **`remove_at` per dead is the O(n·k) trap** — ~4× compact at 50% (P6, one
+  element in from the front).
+- **rebuild** ties compact on time but allocates a second array — prefer the
+  in-place write cursor.
+
+Full strategy/decision writeup: [`bible/removing-dead-entities.md`](../bible/removing-dead-entities.md).
+
 ## P6 — Array front-removal is O(n), drain loop is O(n²) (bench_pop_front.gd)
 
 Backs rule P6 ([#45455](https://github.com/godotengine/godot/issues/45455)).

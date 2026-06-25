@@ -23,6 +23,8 @@ flag conditions; this is the *why* — full symptoms, repros, fixes, and data.
 | [06 — Resource loading](06-resource-loading.md) | preload/load/threaded, cache modes, UID files | drafted |
 | [07 — Architecture types](07-arch-types.md) | scene-tree composition vs DOD vs ECS, comp-vs-inheritance, the escalation ladder — when/why each, sourced | drafted |
 
+**Technique note** (measured): [Removing dead entities from a list](removing-dead-entities.md) — swap-back vs write-cursor compaction vs the `remove_at` trap; one removal vs mass cull have different best answers. Companion to P6 + D2 + D8.
+
 Part IV opens with **"The case for DOD (even in GDScript)"** — a position piece (argues one side, not neutral) on why DOD is the default even where the interpreter mutes the cache win: correctness-by-construction, structural speed that survives Variant boxing, alignment with Godot's own server substrate, and the escalation ladder that lands on DOD anyway.
 
 **Worked examples** (the rules composed, runnable + verified): [combat](dod-by-example.md) — enemy-combat subsystem, fat-`Enemy` strawman → data-oriented decomposition (D1–D8 + P6 + C2a); [perception](dod-perception-example.md) — existence-based alert state + the corrected D8 (inline SoA, do-less); and [inventory](dod-inventory-example.md) — D11, one registry table with convention-derived assets, no mirror arrays. Backed by `tests/example_dod_*_proj/` and literal runs on 4.8.dev.

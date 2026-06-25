@@ -662,6 +662,10 @@ Two things to watch:
 - **Don't call `get_nodes_in_group(&"alive")` inside the per-frame loop.** It
   allocates a fresh array on every call (D2a). Cache the typed `Array[Enemy]`
   on the manager and refresh it on the two edge signals.
+- **Getting the dead *out* of the manager's list** has its own measured answer:
+  swap-back for a single removal, write-cursor *compaction* for culling a whole
+  subset (it beats repeated swap-back and keeps order), never `remove_at` in a
+  loop. See [removing dead entities](removing-dead-entities.md).
 - **The dispatch win is in SoA, not the loop.** Don't reach for a manager-of-nodes
   *for speed* — it's a loss. Reach for it for control (skip/LOD), or go full SoA
   for the speed. And measure first: Part III's heuristic, `(call cost ns) ×
