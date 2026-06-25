@@ -25,7 +25,7 @@ flag conditions; this is the *why* — full symptoms, repros, fixes, and data.
 
 Part IV opens with **"The case for DOD (even in GDScript)"** — a position piece (argues one side, not neutral) on why DOD is the default even where the interpreter mutes the cache win: correctness-by-construction, structural speed that survives Variant boxing, alignment with Godot's own server substrate, and the escalation ladder that lands on DOD anyway.
 
-**Worked example** (the rules composed, runnable + verified): [DOD by example](dod-by-example.md) — one enemy-combat subsystem taken from a fat-`Enemy` strawman to a data-oriented decomposition (D1–D8 + P6 + C2a), backed by `tests/example_dod_combat_proj/` and a literal run on 4.8.dev.
+**Worked examples** (the rules composed, runnable + verified): [combat](dod-by-example.md) — enemy-combat subsystem, fat-`Enemy` strawman → data-oriented decomposition (D1–D8 + P6 + C2a); and [perception](dod-perception-example.md) — existence-based alert state + the corrected D8 (inline SoA, do-less). Backed by `tests/example_dod_*_proj/` and literal runs on 4.8.dev.
 
 ## What makes this worth reading
 
