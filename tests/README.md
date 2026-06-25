@@ -73,6 +73,9 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `repro_lifecycle.gd` | I (C7/C8/C10/H8/M9/C11/C2a + C3.map) | re-tests object-lifecycle bug status |
 | `repro_cycle_proj/` | I (C17) | real `.tres ↔ .tscn` ext_resource cycle — needs a project |
 | `repro_async_proj/` | I (C5/C6) | await-across-free + coroutine-after-`queue_free` — needs a frame loop |
+| `repro_c4_covariance.gd` | I (C4) | typed-array variance — element-covariance, `assign()`, invariant direct assign |
+| `repro_node_leak.gd` | I (C13) | unparented `Node.new()` leak vs `free()` control (OBJECT_COUNT) |
+| `repro_h12_proj/` | I (H12) | `@export` Resource survives scene load — needs a project |
 
 The two `repro_*` scripts are how the Part I version-status table's "Re-tested
 4.8.dev" column was filled — re-run them on your own target before trusting any

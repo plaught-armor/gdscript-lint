@@ -1,0 +1,8 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://h12_node.gd" id="1"]
+[ext_resource type="Resource" path="res://thing.tres" id="2"]
+
+[node name="Holder" type="Node"]
+script = ExtResource("1")
+def = ExtResource("2")

@@ -14,8 +14,11 @@ Draws from [`../rules/engine-bugs.md`](../rules/engine-bugs.md).
 > and C17 are still live (C17 now as a silent partial-load rather than a hang).
 > The lifecycle entries C5, C8, C10, H8, and M9 were re-run and behave as their
 > status claims on 4.8.dev; C6's crash is gone but the coroutine is now silently
-> *dropped* rather than resumed (see its entry). Where a re-test changed or refined
-> the verdict it's called out inline
+> *dropped* rather than resumed (see its entry). Of the previously-unverified tail:
+> C4 resolves to **invariant** typed arrays (covariant assignment is a compile
+> error), C13 (unparented `Node.new()` leak) is **confirmed**, and H12 is
+> **confirmed fixed**. Where a re-test changed or refined the verdict it's called
+> out inline
 > and in the summary table. The table is the fast-path: if your minimum Godot is
 > past the fix-version, drop the workaround; otherwise keep it. **Re-test on your
 > own target** — "fixed on 4.8.dev" is not a promise about 4.7 or 4.9.
@@ -418,9 +421,12 @@ The rules file carries a tail of additional criticals worth knowing about
 but with shorter repros:
 
 - **C4** — `Array[Base]` covariance under `Array[Derived]` assignment.
-  Closed-completed, no fix PR linked.
-  [#83876](https://github.com/godotengine/godot/issues/83876). **Uncertain
-  — re-test on target.**
+  [#83876](https://github.com/godotengine/godot/issues/83876). *4.8.dev: typed
+  arrays are **invariant**. A direct `var b: Array[Base] = derived_arr` is a
+  **compile error** ("Cannot assign a value of type Array[Der] to … Array[Base]"),
+  so the failure is loud at parse time, not a silent bug. Element covariance works
+  (`Array[Base].append(Der)`), and `.assign()` does a checked element-wise copy —
+  that's the conversion path (`repro_c4_covariance.gd`).*
 - **C6** — coroutine resumed after `queue_free`. Fixed ~4.7.
   [#93608](https://github.com/godotengine/godot/issues/93608). *4.8.dev: the crash
   is gone, but the coroutine is **silently dropped** — it does NOT resume to
@@ -432,7 +438,10 @@ but with shorter repros:
   [#76938](https://github.com/godotengine/godot/issues/76938). *4.8.dev: confirmed
   fixed — `super()` runs the base ctor (`repro_lifecycle.gd` → C10).*
 - **C13** — `Node.new()` without a parent leaks; pair every bare `.new()`
-  with an owner or `queue_free`. No issue number — pattern, not a bug.
+  with an owner or `queue_free`. No issue number — pattern, not a bug. *4.8.dev:
+  confirmed — 2000 unparented `Node.new()` with refs dropped leaked exactly 2000
+  objects; the same loop with `n.free()` leaked 0 (`repro_node_leak.gd`). Node is
+  not reference-counted, so dropping the var is not enough.*
 - **C14** — `range(n)` typed as `Array[int]` is actually untyped.
   [#110659](https://github.com/godotengine/godot/issues/110659). **Live** —
   *4.8.dev: confirmed, `range()`'s element type is untyped
@@ -466,7 +475,7 @@ disagree, trust the empirical column **for that build only**.
 | C2 | `const` arrays/dicts shared & mutable | [#61274](https://github.com/godotengine/godot/issues/61274) | **Live** (partial) | **Fixed** — `const` is read-only, mutation raises |
 | C2a | `.make_read_only()` on `static var` | — | Prescribed pattern | **Works** (`is_read_only()` true after) |
 | C3 | typed `.filter()`/`.map()` returns untyped | [#72566](https://github.com/godotengine/godot/issues/72566) | **Live** | **Split**: `.filter()` typed (fixed), `.map()` still untyped |
-| C4 | `Array[T]` covariance | [#83876](https://github.com/godotengine/godot/issues/83876) | **Uncertain** — re-test | — |
+| C4 | `Array[T]` covariance | [#83876](https://github.com/godotengine/godot/issues/83876) | **Uncertain** — re-test | **Invariant** — direct `Array[Base]=Array[Der]` is a compile error; element-covariance + `assign()` work |
 | C5 | `await` on freed object | [#72629](https://github.com/godotengine/godot/issues/72629) | **By design** — validity check is the pattern | **Confirmed** — `is_instance_valid` false after await; guard works |
 | C6 | coroutine after `queue_free` | [#93608](https://github.com/godotengine/godot/issues/93608) | **Fixed ~4.7** | No crash, but coroutine **silently dropped** (does not resume to completion) |
 | C7 | `RefCounted` circular leak | [#7038](https://github.com/godotengine/godot/issues/7038) | **Live** | **Live** — leaked ~4000 objs / 2000 cycles |
@@ -474,13 +483,13 @@ disagree, trust the empirical column **for that build only**.
 | C10 | `super()` in `_init` | [#76938](https://github.com/godotengine/godot/issues/76938) | **Fixed 4.2** | **Confirmed fixed** — `super()` runs base ctor |
 | C11 | `sort_custom` strict `<` | [#58878](https://github.com/godotengine/godot/issues/58878) | **Live** | Not stable by contract (this input held order) |
 | C12 | `assert()` stripped in release | — | **By design** | — (needs a release export) |
-| C13 | `Node.new()` leak | — | Pattern | — |
+| C13 | `Node.new()` leak | — | Pattern | **Confirmed** — 2000 unparented `Node.new()` leaked 2000; `free()` → 0 |
 | C14 | `range(n)` typed as `Array[int]` | [#110659](https://github.com/godotengine/godot/issues/110659) | **Live** | **Live** — `range()` element type is untyped |
 | C15 | typed Dict + `Packed*` value | [#116947](https://github.com/godotengine/godot/issues/116947) | **Live** (dup of #88753) | — (C1 fixed → re-check on target) |
 | C16 | `static var` inheritance | [#87629](https://github.com/godotengine/godot/issues/87629) | **Live** | Observed: subclass shares the base's `static var` |
 | C17 | `.tres ↔ .tscn` preload cycle | [#98551](https://github.com/godotengine/godot/issues/98551) | **Live** (script-level fixed 4.3) | **Live** — no hang, but partial-load: back-ref null + ext_resource error |
 | H8 | freed-Node truthiness lies | [#59816](https://github.com/godotengine/godot/issues/59816) | **Fixed 4.4** (≤4.3 still lie) | **Confirmed fixed** — `is_instance_valid(freed)`=false |
-| H12 | `@export` Resource null on load | [#110394](https://github.com/godotengine/godot/issues/110394) | **Fixed 4.6** | — |
+| H12 | `@export` Resource null on load | [#110394](https://github.com/godotengine/godot/issues/110394) | **Fixed 4.6** | **Confirmed fixed** — `@export` Resource survives scene load |
 | M9 | `Resource.duplicate(true)` skips Array | [#74918](https://github.com/godotengine/godot/issues/74918) | **Fixed 4.5** via `duplicate_deep()` | **Confirmed fixed** — deep-dup, original unaffected |
 | P9 | Lua-style dict-access perf | [#68834](https://github.com/godotengine/godot/issues/68834) | **Fixed 4.4** | — |
 
