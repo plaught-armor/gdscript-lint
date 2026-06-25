@@ -162,6 +162,18 @@ Backs Part I's P9 row (#68834, Lua-style `d.key` slower than `d["key"]`, fixed
 So the old "use brackets for speed" argument is dead on 4.8.dev; bracket access
 remains the style preference for type-clarity (S7), not perf.
 
+## Redundant cast — H14/H14b (bench_redundant_cast.gd)
+
+Backs Part II H14/H14b: a redundant `as T` adds a Variant round-trip. N=2M,
+best-of-7, 2 runs, Godot 4.8.dev (>1 = the redundant cast is slower):
+
+| Case | ratio | reading |
+|---|---|---|
+| `(v as Foo).x` vs narrowed `v.x` (inside `if v is Foo`) | **1.2–1.4×** | drop the `as` — `is` already narrowed |
+| `(d[0] as Foo).x` vs `d[0].x` (typed `Dictionary[int, Foo]`) | **1.2–1.6×** | typed container already returns `Foo` |
+
+Modest but real in a hot loop, and free to fix (the cast is pure clutter).
+
 ## Promotion criterion
 
 Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:

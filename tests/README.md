@@ -80,6 +80,8 @@ verdicts. Run with `godot --headless --script <file>` (the autoload one needs
 | `repro_assert_proj/` | I (C12) | `assert()` body runs in debug, stripped in release — run under both an editor (debug) and a `linux_release` template (release) build |
 | `repro_typing_traps.gd` | II (H3/H6/H7/H11/M4) | enum-is-int, lambda capture, float→int truncation, JSON→typed-Dict, mutate-during-iter |
 | `repro_async2_proj/` | II (M1/M6/M7/M8) | await defers, temp-RefCounted signal lost, `call_deferred` timing, tween on freed node — needs a frame loop |
+| `bench_redundant_cast.gd` | II (H14/H14b) | redundant `as` after `is` / on typed-container access vs direct |
+| `repro_h9_proj/` | II (H9) | `@onready` init bypasses the var's setter (#71372) — needs a scene |
 
 The two `repro_*` scripts are how the Part I version-status table's "Re-tested
 4.8.dev" column was filled — re-run them on your own target before trusting any

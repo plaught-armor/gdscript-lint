@@ -1,0 +1,5 @@
+config_version=5
+
+[application]
+config/name="h9_repro"
+run/main_scene="res://main.tscn"

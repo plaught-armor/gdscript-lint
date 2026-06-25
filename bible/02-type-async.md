@@ -209,7 +209,12 @@ var cs: CellState = _cells.get(path) as CellState
 var cs: CellState = _cells.get(path)
 ```
 
-Containers carry their type — trust them. → **H14**, **H14b**.
+Containers carry their type — trust them. **4.8.dev: measured** — the redundant
+cast is real overhead, not just clutter (`bench_redundant_cast.gd`): inside an
+`is`-narrowed branch, `(v as Foo).x` ran ~1.2–1.4× the cost of the narrowed `v.x`;
+on a typed `Dictionary[int, Foo]`, `(d[0] as Foo).x` ran ~1.2–1.6× `d[0].x`. So
+dropping the redundant `as` is both cleaner and modestly faster in a hot loop.
+→ **H14**, **H14b**.
 
 ### H4 — Type every signal parameter
 
@@ -319,6 +324,15 @@ func _is_hostile_alive(p: BattlePawn) -> bool:
 Trivial single-expression lambdas (`func(x): return x.id`) are not the target —
 the rule fires on multi-statement bodies that the formatter can't reliably
 reflow. → **S1**.
+
+**4.8.dev / gdscript-formatter 0.20.1: the "breaks them" rationale no longer
+holds.** Fed a multi-statement inline lambda, this formatter version reflows it
+cleanly — it lifts `func(p):` onto its own line and re-indents the body
+consistently, and the result parses (`godot --check-only` exit 0). So on a current
+toolchain S1 is no longer about the formatter corrupting indentation; it stands on
+the *other* grounds — an extracted named method is testable in isolation, reads
+better, and shows up in stack traces. Keep the rule for those reasons, not the
+formatter-breakage one.
 
 ### H6 — Capture by-value for locals, by-ref for members
 
@@ -661,7 +675,18 @@ func _apply_value() -> void:
         _label.text = str(_value)
 ```
 
-→ **H9**.
+**4.8.dev (refines this):** on this build the `@onready` initial assignment does
+**not** call the setter at all — it writes the field directly. Measured
+(`repro_h9_proj/`): an `@onready var` with a `set(value)` accessor left the setter
+**unfired** during `@onready` init (`@onready_fired_setter=false`), while a normal
+later assignment did fire it (`normal_assign_fired_setter=true`, so the setter is
+genuinely wired). That means the specific crash this rule warns about — the setter
+running at `@onready` time and touching a not-yet-ready sibling — **can't occur on
+4.8.dev**, because the setter isn't invoked then. Two caveats keep the rule alive:
+(1) the inverse surprise — if you *rely* on the setter normalizing the `@onready`
+value, it won't run, so the field holds the raw value; (2) older Godot versions
+(pre-fix) do call it, so the split-and-apply pattern above is still the portable
+shape. → **H9**.
 
 ---
 
