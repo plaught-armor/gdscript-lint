@@ -17,3 +17,5 @@ jobs:
         run: python3 --version
       - name: gd-lint rule assertions
         run: SKIP_GODOT=1 bash tests/run.sh
+      - name: bible snippet lint (good blocks must follow the rules)
+        run: python3 tests/lint_bible_snippets.py bible

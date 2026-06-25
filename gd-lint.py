@@ -251,9 +251,36 @@ def rule_h2(raw: str, m: str) -> str | None:
     return None
 
 
+def _match_paren(s: str, open_idx: int) -> int | None:
+    # index of the ')' matching the '(' at open_idx, or None if unbalanced on s.
+    depth = 0
+    for i in range(open_idx, len(s)):
+        if s[i] == "(":
+            depth += 1
+        elif s[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return None
+
+
 def rule_s1(raw: str, m: str) -> str | None:
-    if _RE_LAMBDA.search(m):
-        return "S1: no inline lambda — extract to a named method (formatter breaks indentation)"
+    # Flag only MULTI-STATEMENT inline lambdas (body on the following lines) —
+    # those are what the formatter reflows and what's worth extracting (style.md
+    # S1 / bible §02). A single-expression lambda `func(x): return x.id` is
+    # explicitly NOT the target: content after the head ':' on the same line
+    # exempts it.
+    for mo in _RE_LAMBDA.finditer(m):
+        close = _match_paren(m, mo.end() - 1)
+        if close is None:
+            continue
+        k = close + 1
+        while k < len(m) and m[k] in " \t":
+            k += 1
+        if k >= len(m) or m[k] != ":":
+            continue                       # not a `func(...):` lambda head
+        if m[k + 1:].strip() == "":        # nothing after ':' → multi-statement
+            return "S1: no inline lambda — extract to a named method (formatter reflows multi-statement bodies; a single-expr `func(x): expr` is fine)"
     return None
 
 

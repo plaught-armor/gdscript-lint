@@ -5,14 +5,14 @@ var items: Array = []
 
 func bad() -> void:
 	# Non-strict comparator: returns true on equal → breaks strict-weak-ordering.
-	# S1 also fires (inline lambda) — orthogonal to the C11 correctness bug.
-	items.sort_custom(func(a, b): return a.hp <= b.hp) # EXPECT S1 C11
-	items.sort_custom(func(a, b): return a.x >= b.x) # EXPECT S1 C11
+	# Single-expr lambdas → S1 does NOT fire; only the C11 correctness bug.
+	items.sort_custom(func(a, b): return a.hp <= b.hp) # EXPECT C11
+	items.sort_custom(func(a, b): return a.x >= b.x) # EXPECT C11
 
 
 func ok() -> void:
-	# Strict '<' inline comparator — correct; only S1 (extract the lambda).
-	items.sort_custom(func(a, b): return a.hp < b.hp) # EXPECT S1
+	# Strict '<' single-expression comparator — correct, and S1-exempt (single-expr).
+	items.sort_custom(func(a, b): return a.hp < b.hp)
 	# Named comparator: body not visible to a line linter (reviewer's job).
 	items.sort_custom(_by_hp)
 	# A '<=' outside any sort_custom must not trip C11.
