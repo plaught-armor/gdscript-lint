@@ -241,7 +241,8 @@ arr.resize(int(1.5))
 
 Pair with the P12a literal-matches-param table in `style.md`: most narrowing
 bugs originate from a literal that should have matched the declared type (`5`,
-not `5.0`).
+not `5.0`). **4.8.dev: confirmed** — `Array.resize(2.9)` yields `size()==2`, the
+fractional part dropped with no error (`repro_typing_traps.gd` → H7).
 
 ### H12 — `@export var` of a Resource type defaults to `null`
 
@@ -263,6 +264,15 @@ crash the first time the inner shape diverges from what the annotation claimed.
 boundary — convert to the typed shape explicitly at the conversion site, don't
 let the annotation lie.
 
+**4.8.dev (refines this):** the *checked* conversion path is better than "silently
+accept, crash later." `Dictionary[String, int].assign(JSON.parse_string('{"a":
+"not-an-int"}'))` raises **at the `assign()`** — `"Unable to convert value at key
+'a' from 'String' to 'int'"` — and leaves the destination empty rather than
+admitting the bad value (`repro_typing_traps.gd` → H11). So `.assign()` validates
+element types eagerly. The trap that remains is a *direct* annotated assignment of
+an untyped parse result without `.assign()`; the discipline (convert explicitly at
+the boundary, prefer `.assign()`) is what makes the failure loud and immediate.
+
 ### H3 — Enums are an `int` at runtime; type the boundary
 
 GDScript enums are `int` under the hood. The compiler will accept a bare `int`
@@ -271,7 +281,8 @@ The discipline is: at API boundaries, declare the enum type — registry public
 methods, `@export var slot: ItemRegistry.Id`, signal parameters. Inside hot
 loops or save-format fields, `int` is the right choice (`PackedInt32Array` can't
 carry an enum type; save slots round-trip as `int`). This is covered in detail
-in [`../rules/dod.md`](../rules/dod.md) D10/D10a.
+in [`../rules/dod.md`](../rules/dod.md) D10/D10a. **4.8.dev: confirmed** —
+`typeof(SomeEnum.MEMBER) == TYPE_INT` (`repro_typing_traps.gd` → H3).
 
 ---
 
@@ -339,6 +350,10 @@ captured by their reference, and mutations through the reference are visible.
 Don't try to share a local `int` or `bool` by capturing it; the value
 semantics will silently lie.
 
+**4.8.dev: confirmed** — a lambda that does `local_v += 1; _member_v += 1` leaves
+the outer `local_v` at `0` (captured by value) while `_member_v` becomes `1`
+(mutated through `self`) (`repro_typing_traps.gd` → H6).
+
 → lint rule **H6**.
 
 ---
@@ -385,6 +400,11 @@ func boot() -> void:
     await get_tree().process_frame
     _spawn_initial_enemies()
 ```
+
+**4.8.dev: confirmed** — calling an awaiting method and reading a flag it sets
+*after* its `await`, the flag is still `false` on the next line: the `await`
+returns control to the caller and the post-`await` code runs in a later frame
+(`repro_async2_proj/` → M1).
 
 `call_deferred` runs at end of the current frame, after the current call stack
 unwinds — the right tool for "do this after init finishes, but in the same
@@ -491,7 +511,9 @@ func setup_listener() -> void:
 
 This is the same lifetime trap as M5 (non-autoload nodes disconnecting in
 `_exit_tree` from autoload signals): a signal connection is **not** a strong
-reference to its target. → **M6**.
+reference to its target. **4.8.dev: confirmed** — connect a signal to a local
+`RefCounted`'s method, let the local fall out of scope, then emit: the handler
+does not run (`fired=false`), no error (`repro_async2_proj/` → M6). → **M6**.
 
 ### M7 — `call_deferred` runs at end of frame, not next frame
 
@@ -500,7 +522,10 @@ current frame's *idle* phase, after the active call stack unwinds. Code that
 assumes "deferred = next tick" misorders state changes — the deferred call may
 run before a `_process` you expected to fire first. When you genuinely want
 "next physics tick," use `await get_tree().physics_frame`; when you want "next
-idle frame," use `await get_tree().process_frame`. → **M7**.
+idle frame," use `await get_tree().process_frame`. **4.8.dev: confirmed** — after
+`call_deferred(&"f")` the target has not run on the next line (`ran=false`); it
+has run after one `await process_frame` (`ran=true`) (`repro_async2_proj/` → M7).
+→ **M7**.
 
 ### M8 — `create_tween()` is node-bound
 
@@ -519,7 +544,16 @@ create_tween().tween_property(self, "modulate:a", 0.0, 0.5)
 ```
 
 The `Node.create_tween()` form (which the code above relies on) is the
-node-bound variant — it lives in `Node`, not `SceneTree`. → **M8**.
+node-bound variant — it lives in `Node`, not `SceneTree`. **4.8.dev: confirmed,
+with two nuances worth knowing** (`repro_async2_proj/` → M8). A node-bound tween
+*is* invalidated when its node is freed, but (1) there's a **one-frame lag** — the
+frame the node becomes invalid, `tw.is_valid()` still returns `true`; it flips to
+`false` the next frame — and (2) `tw.is_running()` keeps returning `true` even
+after `is_valid()` has gone `false`, so gate on `is_valid()`, not `is_running()`,
+when deciding whether a tween is still alive. (Measuring this also surfaced a test
+trap: an *empty* tween, with no tweener attached, is auto-killed at frame start for
+an unrelated reason — give the tween real work before drawing conclusions.)
+→ **M8**.
 
 ### M4 — Don't mutate a collection during iteration
 
@@ -548,7 +582,9 @@ for e in dead:
 ```
 
 Dictionaries have the same property — mutating keys during iteration is
-undefined. → **M4**.
+undefined. **4.8.dev: confirmed** — iterating `[1,2,3,4,5,6]` and `erase(3)` when
+the loop var hits `2` visits `[1,2,4,5,6]` — the element after the removed one is
+skipped (`repro_typing_traps.gd` → M4). → **M4**.
 
 ### M9 — `Resource.duplicate(true)` skips `Array` contents
 
