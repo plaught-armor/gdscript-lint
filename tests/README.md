@@ -27,6 +27,7 @@ Each finding carries a category — **CORRECT** (bug), **PERF** (speed), **STYLE
 | C1   | CORRECT | `c1.gd` | (see below) |
 | C3   | CORRECT | `c3.gd`       | `var x: Array[T] = coll.filter()/.map()` flagged; `.assign(coll.filter())` not |
 | C14  | CORRECT | `c14.gd`     | `var x: Array[T] = range()` flagged; `.assign(range())` not |
+| C11  | CORRECT | `c11.gd`     | inline `sort_custom(func…<=/>=)` flagged (with S1); strict `<` / named comparator / `<=` outside sort_custom not |
 | C9   | CORRECT | `c9.gd`, `c9_refcounted.gd` | reserved Node method redefined flagged; domain `get_name()` on RefCounted not (base-scoped). `# no-godot-validate` — engine itself rejects these |
 | P22  | PERF (advisory) | `p22.gd` | global `clamp/abs(0.5…)` flagged; `clamp(int)`, `clampf`, `vec.lerp()` method not |
 | H1   | PERF | `h1.gd`       | `:=` flagged; `:=` inside string / comment not |

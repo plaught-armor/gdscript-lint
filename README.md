@@ -41,6 +41,7 @@ Each finding prints `path:line: RULE [CATEGORY]: message`.
 | C3 | CORRECT | block | typed `Array[T] = coll.filter()/.map()` → untyped (#72566) |
 | C9 | CORRECT | block | redefining a reserved Node/Object method (collision) |
 | C14 | CORRECT | block | typed `Array[T] = range()` → untyped (#110659) |
+| C11 | CORRECT | block | inline `sort_custom` comparator using `<=`/`>=` (must be strict — #58878) |
 | H1 | PERF | block | `:=` instead of explicit `var x: T =` (static typing ~40% faster) |
 | H2 | PERF | block | untyped `for x in …` (type the loop var) |
 | S6 | PERF | block | `Array[primitive]` where a `Packed*Array` exists |

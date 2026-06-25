@@ -28,6 +28,7 @@ Rules (cite the corpus):
   C14  Array[T] = range()   — typed Array from range() returns untyped (#110659)
   C9   func get_name()/...   — redefining a reserved Node/Object method (collision)
   P22  clamp()/abs()/lerp()  — float math → clampf/absf/lerpf (~1.3x) (advisory)
+  C11  sort_custom(func..<=)  — comparator must be strict '<'/'>' (#58878)
   P6   .pop_front()/.pop_at(0) — O(n) front-shift on Array (#45455) (advisory)
   H14  (x as T) after 'is T'  — redundant cast, 'is' already narrowed (advisory)
 
@@ -185,6 +186,16 @@ _RE_P22 = re.compile(r"(?<![\w.])(clamp|abs|max|min|floor|ceil|round|lerp)\((?=[
 # regardless of starting size. The linter can't see the surrounding loop or the
 # array's runtime length, so it flags the call and lets the human judge both.
 _RE_POP_FRONT = re.compile(r"\.pop_front\(\s*\)|\.pop_at\(\s*0\s*\)")
+# C11 (CORRECT, #58878): an Array.sort_custom() comparator must impose a STRICT
+# weak ordering — it returns true iff a sorts strictly BEFORE b. A '<=' / '>='
+# comparator returns true on equal elements too, which breaks the contract and
+# yields an unstable / wrong sort. Scoped to an INLINE lambda comparator
+# (sort_custom(func ...)) carrying a non-strict operator on the same line — the
+# one form a line linter can see. A named-function comparator's body is out of
+# view (the reviewer's job). S1 also fires on the inline lambda (extract it);
+# C11 is the orthogonal correctness concern on the operator itself.
+_RE_SORT_CUSTOM_LAMBDA = re.compile(r"\bsort_custom\s*\(\s*func\b")
+_RE_NONSTRICT_CMP = re.compile(r"[<>]=")
 
 
 def _range_args(m: str, open_idx: int) -> list[str] | None:
@@ -315,6 +326,12 @@ def rule_p22(raw: str, m: str) -> str | None:
     return None
 
 
+def rule_c11(raw: str, m: str) -> str | None:
+    if _RE_SORT_CUSTOM_LAMBDA.search(m) and _RE_NONSTRICT_CMP.search(m):
+        return "C11: sort_custom comparator must be a STRICT '<'/'>' — '<='/'>=' returns true on equal elements, breaking the strict-weak-ordering contract (#58878) → unstable/wrong sort"
+    return None
+
+
 def rule_p6(raw: str, m: str) -> str | None:
     if _RE_POP_FRONT.search(m):
         return ("P6: Array.pop_front()/pop_at(0) is O(n) — head removal shifts every element (#45455); "
@@ -333,6 +350,7 @@ LINE_RULES: dict[str, object] = {
     "C1": rule_c1,
     "C3": rule_c3,
     "C14": rule_c14,
+    "C11": rule_c11,
     "S6": rule_s6,
     "S6b": rule_s6b,
     "S15": rule_s15,
@@ -353,6 +371,7 @@ ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14"}
 # Category per rule: CORRECT (bug / wrong result), PERF (speed), STYLE (idiom).
 CATEGORY: dict[str, str] = {
     "C1": "CORRECT", "C3": "CORRECT", "C9": "CORRECT", "C14": "CORRECT",
+    "C11": "CORRECT",
     "H1": "PERF", "H2": "PERF", "S6": "PERF", "D7b": "PERF", "P12a": "PERF",
     "L1": "PERF", "L2": "PERF", "P22": "PERF", "P6": "PERF", "H14": "PERF",
     "S1": "STYLE", "S6b": "STYLE", "S15": "STYLE", "L3": "STYLE",
