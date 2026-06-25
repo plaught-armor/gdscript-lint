@@ -21,6 +21,7 @@ flag conditions; this is the *why* — full symptoms, repros, fixes, and data.
 | [04 — Data-oriented design](04-data-oriented.md) | existence-based processing, ID refs, hot/cold split, condition tables | drafted |
 | [05 — Architecture](05-architecture.md) | project skeleton, autoloads, naming, subsystem shapes | drafted |
 | [06 — Resource loading](06-resource-loading.md) | preload/load/threaded, cache modes, UID files | drafted |
+| [07 — Architecture types](07-arch-types.md) | scene-tree composition vs DOD vs ECS, comp-vs-inheritance, the escalation ladder — when/why each, sourced | drafted |
 
 ## What makes this worth reading
 
