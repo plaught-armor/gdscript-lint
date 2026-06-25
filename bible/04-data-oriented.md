@@ -134,10 +134,13 @@ dispatch that fits.
 
 ## 1. POD data, pure transforms (D1, D6)
 
-The first move is a sharp split between the *record* and the *code that acts on
-it*. A record is plain old data: fields, a constructor, nothing else. Behavior
-lives elsewhere — on a `static func` of a systems class, or on the Node that
-owns the runtime state.
+**In plain terms:** keep *what a thing is* (its fields) apart from *what you do
+to it* (the code). The data class just holds values; the work happens in a
+separate function that takes data in and hands data back.
+
+A record is plain old data — fields, a constructor, nothing else. Behavior lives
+elsewhere: a `static func` on a systems class, or the Node that owns the runtime
+state.
 
 ```gdscript
 # Bad — behavior in the data class, mutates self, hard to test.
@@ -196,9 +199,10 @@ of the call matches the shape of the work. → D8, below.
 
 ## 2. Existence-based processing (D2, D2a)
 
-The second move is to stop encoding optional state as a field on every entity
-and start encoding it as **membership in a container**. The textbook example
-is `is_dead`:
+**In plain terms:** instead of a true/false flag on every object ("is this one
+dead?"), keep a *list of the ones it's true for*. Being in the list **is** the
+state. Nothing to keep in sync, and you only ever loop over the ones that
+matter. The textbook example is `is_dead`:
 
 ```gdscript
 # Bad — flag + guard everywhere, will desync.
@@ -318,10 +322,14 @@ roll your own only when you need typed storage or save-side serialization.
 
 ## 3. References by integer ID (D3)
 
-When a reference *crosses systems*, *gets serialized*, *sits in a signal
-payload*, or *outlives the holder's subtree*, store `get_instance_id()` (or
-your own assigned ID) and resolve via `instance_from_id()` + a validity check
-at use site.
+**In plain terms:** when you need to remember *another* object that might get
+deleted out from under you, don't hold the object — hold its ID number, and look
+it up when you actually need it. The lookup gives you the live object or
+nothing; it can never hand you the wrong object.
+
+Store `get_instance_id()` (or your own ID) and resolve via `instance_from_id()`
++ a validity check at the use site when a reference *crosses systems*, *gets
+serialized*, *sits in a signal payload*, or *outlives the holder's subtree*.
 
 ```gdscript
 # Bad — live ref; freed-source bug, cycle, won't serialize.
@@ -371,10 +379,14 @@ type, and reads cleaner. If you can't prove it, use the ID.
 
 ## 4. Split by access pattern, not domain object (D4)
 
-A monolithic `Enemy` class with thirty fields touched by five different
-systems is the wrong shape. Each system reads its own subset; most fields are
-cold to most callers. The fix is to decompose along the *access pattern*, not
-along the imaginary domain object.
+**In plain terms:** don't put all 30 of an enemy's fields in one `Enemy` class
+just because "an enemy is one thing." Group fields by *which system uses them* —
+positions where the physics loop wants them, AI state where the AI loop wants
+it. The entity's ID number is the thread that ties the pieces back together.
+
+A monolithic `Enemy` with thirty fields touched by five systems is the wrong
+shape — each system reads its own subset, most fields cold to most callers.
+Decompose along the *access pattern*, not the imaginary domain object.
 
 A worked example:
 
@@ -413,8 +425,14 @@ they're two different access patterns and the data wants to be split.
 
 ## 5. Hot/cold split (D5)
 
-Within the data you do keep together, the per-frame fields should not
-co-locate with load-time fields.
+**In plain terms:** the values that change every frame (position, health) should
+live apart from the values fixed for a whole *kind* of thing (max health, model,
+sounds). Put the fixed stuff in one shared `EnemyDef` that all enemies of that
+kind point at — one copy, editable in one place — instead of repeating it on
+every instance.
+
+Within the data you do keep together, per-frame fields should not co-locate with
+load-time fields.
 
 - **Hot** — position, velocity, current health, current animation state,
   current AI state.
@@ -441,8 +459,12 @@ data is in the wrong place — it should be a new `EnemyDef.tres`.
 
 ## 6. Condition tables over branch chains (D7)
 
-Finite, known dispatch keys → a `Dictionary` lookup keyed by the
-discriminator. New cases become new rows, not new code.
+**In plain terms:** when you have a long `if/elif` that just maps one fixed set
+of inputs to outputs, make it a lookup table instead. Adding a case becomes
+adding a row of *data* — nobody has to touch the function, and a designer can
+even tune it from a `.tres`.
+
+Finite, known dispatch keys → a `Dictionary` lookup keyed by the discriminator.
 
 ```gdscript
 # Bad — every (weapon, armor) edits this fn.
@@ -563,10 +585,13 @@ loud (or a boot-time validator), exactly as you'd keep `match`'s `_:` arm.
 
 ## 7. Batched homogeneous processing over per-Node ticks (D8)
 
-N entities of one kind each running `_physics_process` pays the per-Node tick
-overhead × N. One manager iterating once per tick is faster *and* composes
-cleanly with existence-based filtering — the dead and the distant aren't even
-in the loop.
+**In plain terms:** instead of 5000 enemies each asking the engine to call their
+own update function every frame, have *one* manager loop over a list and update
+them itself. Same work, far fewer engine hand-offs — and the dead and the
+distant simply aren't in the list to begin with.
+
+One manager iterating once per tick beats N entities each running
+`_physics_process`, and it composes cleanly with existence-based filtering (§2).
 
 **4.8.dev: measured** (`repro_batch_tick_proj/`). 5000 nodes doing identical
 per-entity work, self-ticking via their own `_physics_process` vs disabled and
@@ -574,11 +599,8 @@ driven by one manager loop: the per-Node form ran **~1.15–1.19× slower per ph
 frame** (≈2.5 ms vs ≈2.1 ms). The gap is the engine's per-callback bookkeeping
 (it walks the tree and invokes `_physics_process` on each node individually);
 collapsing that into a single `for` over a manager-owned array removes it, and the
-gap grows with entity count. **In plain terms:** asking the engine to call 5000
-separate functions every frame costs more than calling one function that does the
-5000 things itself — same work, far fewer hand-offs. Modest at this size; it's the
-kind of win that matters at thousands of entities, not dozens (see the ROI note
-below).
+gap grows with entity count. Modest at this size; the kind of win that matters at
+thousands of entities, not dozens (see the ROI note below).
 
 ```gdscript
 class_name EnemyManager extends Node
@@ -623,6 +645,11 @@ distance away once the data is in a manager-owned array.
 ---
 
 ## 8. Dispatch — static, autoload, signal (D9, P18)
+
+**In plain terms:** there are several ways to call a helper, and they cost
+different amounts. Cheapest is a `static func` on a `class_name`'d class.
+Autoloads and signals cost more — use them for what they're *for* (shared state,
+decoupling), not because they're convenient.
 
 When a helper is stateless, the cheapest dispatch is a `static func` on a
 `class_name`'d RefCounted. The full cost ladder is in
@@ -684,7 +711,11 @@ Concretely:
 
 ## 9. Enums vs StringNames at API boundaries (D10, D10a)
 
-For a fixed closed set — states, kinds, slots, categories — use an `enum int`.
+**In plain terms:** for a fixed list of named options (states, item kinds), use
+an `enum` — it's an integer the compiler checks, so a typo won't compile. Use
+`StringName` only for text-like work or engine calls that demand it. Enums
+compare as ints, never silently pass a misspelling.
+
 Reserve `StringName` for string-like ops (concat, prefix match) or engine APIs
 that demand it (`add_to_group`, `Input.is_action_*`).
 
@@ -727,9 +758,13 @@ cast or a corrected type, and warnings at non-boundary sites are bugs.
 
 ## 10. Mirror registries are coupling, not split (D11)
 
-D4 says "split data by access pattern, not domain object." It does **not** say
-"carry two parallel arrays keyed by the same discriminator." Two registries
-sharing one `enum Id` as their index aren't a split — they're coupling
+**In plain terms:** don't keep two lists that must stay the same length, lined
+up by the same index. That's not "splitting data" — it's storing one fact twice,
+and now every change has to touch both. The tell is a test that checks the two
+lists are the same size.
+
+§4 says "split by access pattern, not domain object." It does **not** mean
+"carry two parallel arrays keyed by the same `enum Id`" — that's coupling
 expressed as two files.
 
 ```gdscript
