@@ -1,0 +1,11 @@
+config_version=5
+
+[application]
+config/name="autoload_bench"
+
+[autoload]
+Bus="*res://bus.gd"
+
+[application]
+
+run/main_scene="res://main.tscn"

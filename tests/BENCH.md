@@ -64,6 +64,92 @@ Decision from the data:
 - **H13, S11 → held.** Modest/marginal perf + real FP surface (legit reflection;
   can't detect a gated print).
 
+## Dispatch & call-overhead (bench_dispatch_mechanism.gd)
+
+Backs Part III §1 (dispatch) + §2 (call overhead) of the bible. Previously the
+chapter cited numbers from Godot 4.7 with **no reproducible script**; this bench
+re-measures on the build we ship against. N=600k rows, best-of-7, 3 runs, Godot
+4.8.dev. Discriminators are read from a pre-filled `PackedInt32Array` so every
+variant pays the same key-fetch and the matched arm can't be constant-folded.
+
+```bash
+godot --headless --script tests/bench_dispatch_mechanism.gd
+```
+
+§1 dispatch (baseline = `Array[Callable]` index = 1.00×, **higher = faster**):
+
+| Construct | vs Callable | reading |
+|---|---|---|
+| `Array[Callable]` index | 1.00× | baseline |
+| `match` + direct call | **0.67×** | slower than the Callable it would replace |
+| `if/elif` + direct call | 1.03× | ~par with Callable |
+| `if/elif` + inline body | **~2.4×** | the only clear win — inlining beats the table |
+| `match`, 6 arms, hit last | **0.41×** | linear scan degrades hard |
+| `if/elif`, 6 arms, hit last | 0.78× | degrades too, but ~1.9× faster than `match` |
+
+§2 call overhead (baseline = inline expr = 1.00×, **higher = slower**; trivial
+inline baseline → ratios are an upper bound on relative overhead):
+
+| Path | × inline | reading |
+|---|---|---|
+| inline | 1.00 | baseline (`acc += i + 1`) |
+| `static func` on RefCounted | ~4.1× | cheapest indirection |
+| instance method, cached ref | ~5.1× | |
+| `get_node()` per call | ~9.8× | ~2× a cached ref — cache it |
+| `signal.emit()`, 1 listener | ~9.5× | ≈ a `get_node()` call |
+| `signal.emit()`, 4 listeners | ~23× | scales ~linearly with listeners |
+
+Findings (vs the old 4.7 figures the chapter used to cite): the qualitative story
+is unchanged and **stronger** — `match` is the slowest value-dispatch at every arm
+count; inlining an `if/elif` body is the real speed win; signals are not a speed
+tool and scale with listener count. Magnitudes shifted (engine version + a more
+trivial inline baseline), which is exactly why the chapter is version-tagged.
+Not benched here: the autoload-global-identifier path (needs a project with a
+registered autoload, not a standalone `--script` run) — carried from the older
+ladder, flagged as un-re-measured.
+
+## Static typing, groups, convention dispatch, autoload
+
+Backs the remaining measurable perf claims across Parts II–IV. All Godot 4.8.dev,
+best-of-7, 2–3 runs.
+
+**Static typing (`bench_static_typing.gd`, N=2M)** — backs Part III §5 / II §1:
+
+| Pair | ratio | reading |
+|---|---|---|
+| untyped (Variant) vs fully typed, int arithmetic | **1.33–1.38×** | typed ~25–28% faster — real, but **below the folklore "40–47%"** |
+| `:=` inferred vs `var x: T =` explicit | **1.02–1.04×** | **wash** — `:=` is typed; H1 is a consistency rule, not perf |
+
+**Group ops (`bench_group_ops.gd`)** — backs Part IV D2a:
+
+| Call | measured | reading |
+|---|---|---|
+| `add+remove_from_group` | ~55 ns/pair | O(1), cheap |
+| `is_in_group(&"x")` | ~23 ns/call | O(1) |
+| `get_first_node_in_group` | ~34 ns/call | O(1), no alloc |
+| `is_in_group(&"player")` vs `is Player` | **1.00×** | identical — prefer `is` for *safety*, not speed |
+| `get_nodes_in_group` vs cached array | **7.6×** slower | the alloc footgun (group=200; grows with size) |
+
+**Convention dispatch (`bench_convention_dispatch.gd`, N=1M)** — backs Part IV D7a:
+
+| Pair | ratio | reading |
+|---|---|---|
+| `Id.keys()[id].to_lower()` vs `if/elif` literal helper | **1.95×** | the keys()/to_lower() allocation costs ~2× — helper holds |
+
+**Autoload (`autoload_bench_proj/`, N=600k)** — completes Part III §2's ladder
+(needs a real project; autoload globals don't exist under bare `--script`):
+
+| Path | × inline |
+|---|---|
+| inline | 1.00 |
+| static func | ~4.16 |
+| instance method | ~5.31 |
+| autoload global ident `Bus.x()` | ~5.71 |
+
+Autoload lands just above the instance-method tier and well below `get_node()`
+(~9.8× in the dispatch bench) — confirms "use the global ident, don't `get_node()`
+an autoload in a hot path."
+
 ## Promotion criterion
 
 Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:

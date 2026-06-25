@@ -53,6 +53,29 @@ design judgment and are enforced by the `gdscript-reviewer` subagent (LLM), not
 this suite. "All rules caught" here means all *linter* rules, not the full
 corpus.
 
+## Benchmarks & repros (the Bible's evidence)
+
+Separate from the fixture suite: these back the measured claims and version-status
+table in [`../bible/`](../bible/). They aren't pass/fail — they print numbers /
+verdicts. Run with `godot --headless --script <file>` (the autoload one needs
+`--path`, see its header). Results recorded in [`BENCH.md`](BENCH.md).
+
+| Script | Backs | What it measures |
+|---|---|---|
+| `bench_loop_idiom.gd` | III §3 | L1/L2/L3 loop idioms |
+| `bench_candidate_rules.gd` | III §4/§5 | P22 typed math, H13 call, C3/C14 iter, S11 print |
+| `bench_dispatch_mechanism.gd` | III §1/§2 | `match`/`if-elif`/Callable dispatch; call-overhead ladder |
+| `bench_static_typing.gd` | III §5, II §1 | typed vs untyped; `:=` vs explicit |
+| `bench_group_ops.gd` | IV D2a | group membership O(1); `get_nodes_in_group` alloc; `is` vs `is_in_group` |
+| `bench_convention_dispatch.gd` | IV D7a | `keys()[id].to_lower()` vs `if/elif` helper |
+| `autoload_bench_proj/` | III §2 | autoload global-ident call (needs a real project) |
+| `repro_typed_collections.gd` | I (C1/C2/C3/C14/C16) | re-tests const/typed-collection bug status on this build |
+| `repro_lifecycle.gd` | I (C7/C8/C10/H8/M9/C11/C2a + C3.map) | re-tests object-lifecycle bug status |
+
+The two `repro_*` scripts are how the Part I version-status table's "Re-tested
+4.8.dev" column was filled — re-run them on your own target before trusting any
+"fixed" verdict.
+
 ## How a fixture works
 
 Each `fixtures/*.gd` is self-contained, parse-valid GDScript. A line that should
