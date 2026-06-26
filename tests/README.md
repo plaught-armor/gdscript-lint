@@ -27,13 +27,12 @@ Each finding carries a category — **CORRECT** (bug), **PERF** (speed), **STYLE
 | C1   | CORRECT | `c1.gd` | (see below) |
 | C3   | CORRECT | `c3.gd`       | `var x: Array[T] = coll.filter()/.map()` flagged; `.assign(coll.filter())` not |
 | C14  | CORRECT | `c14.gd`     | `var x: Array[T] = range()` flagged; `.assign(range())` not |
-| C11  | CORRECT | `c11.gd`     | inline `sort_custom(func…<=/>=)` flagged (with S1); strict `<` / named comparator / `<=` outside sort_custom not |
+| C11  | CORRECT | `c11.gd`     | inline `sort_custom(func…<=/>=)` flagged; strict `<` / named comparator / `<=` outside sort_custom not |
 | M1   | CORRECT | `m1.gd`      | `await` in `_ready()` body flagged; `await` in any other func not |
 | C9   | CORRECT | `c9.gd`, `c9_refcounted.gd` | reserved Node method redefined flagged; domain `get_name()` on RefCounted not (base-scoped). `# no-godot-validate` — engine itself rejects these |
 | P22  | PERF (advisory) | `p22.gd` | global `clamp/abs(0.5…)` flagged; `clamp(int)`, `clampf`, `vec.lerp()` method not |
 | H1   | PERF | `h1.gd`       | `:=` flagged; `:=` inside string / comment not |
 | H2   | `h2.gd`       | untyped `for x in` flagged; `for x: T in` not |
-| S1   | `s1.gd`       | inline `func(...)` lambda flagged; named func not |
 | C1   | `c1.gd`       | `const Packed*Array` flagged; `var` packed / `const int` not |
 | S6   | `s6.gd`       | `Array[int/Vector2/String]` flagged; `Array[Vector2i/StringName/bool]` (no packed variant) not |
 | S6b  | `s6.gd`       | typed `: Packed*Array = Packed*Array()` / `([...])` flagged; bare literal, var-conversion, arg-position not |

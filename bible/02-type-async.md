@@ -391,32 +391,28 @@ which a text linter can't see — so this stays a reviewer / `style.md` **S9** c
 
 ## 2d. Lambdas and capture semantics
 
-**In plain terms:** a lambda is a small inline function. Two surprises bite
-people regularly: writing the body inline can confuse the auto-formatter, and
-the way the lambda "remembers" outside variables is different for local ones
-than for object fields — so a counter you increment inside the lambda may not
-actually go up where the caller can see it.
+**In plain terms:** a lambda is a small inline function. The surprise that bites:
+the way a lambda "remembers" outside variables is different for local ones than
+for object fields — so a counter you increment inside the lambda may not actually
+go up where the caller can see it.
 
-Lambdas are useful in GDScript, but their interaction with the formatter and
-with capture semantics is the source of two reliable foot-guns.
+Lambdas are fine to use in GDScript (an old rule against inline ones is retired —
+see below). The real foot-gun is capture semantics.
 
-### S1 — No inline lambdas (the formatter breaks them)
+### Inline lambdas are fine (the old S1 rule is retired)
 
-`gdscript-formatter` doesn't reliably preserve indentation inside an inline
-lambda. The function runs correctly; the formatted file looks like the lambda
-body is at the wrong nesting level, and the next person to read it (or the next
-review tool) treats it as a bug. The deterministic fix is to extract the body
-to a named method:
+There was an S1 rule banning multi-statement inline lambdas, on the grounds that
+`gdscript-formatter` mangled their indentation. That rationale is **dead**: on a
+current toolchain (gdscript-formatter 0.20.1) the formatter reflows a
+multi-statement inline lambda cleanly — it lifts `func(p):` onto its own line,
+re-indents the body, and the result parses (`godot --check-only` exit 0). With
+the only hard, measurable reason gone, the rule is **retired** — inline lambdas
+are no longer flagged.
+
+Extracting a multi-statement body to a named method is still a reasonable
+*preference* — it's unit-testable in isolation and shows up in stack traces:
 
 ```gdscript
-# Bad — formatter will rearrange the indentation, making this hard to read.
-queue.filter(func(p):
-    if not is_instance_valid(p):
-        return false
-    return p.is_alive() and p.faction != self.faction
-)
-
-# Good — extracted, formatter-stable, also testable.
 result.assign(queue.filter(_is_hostile_alive))
 
 func _is_hostile_alive(p: BattlePawn) -> bool:
@@ -425,18 +421,8 @@ func _is_hostile_alive(p: BattlePawn) -> bool:
     return p.is_alive() and p.faction != faction
 ```
 
-Trivial single-expression lambdas (`func(x): return x.id`) are not the target —
-the rule fires on multi-statement bodies that the formatter can't reliably
-reflow. → **S1**.
-
-**4.8.dev / gdscript-formatter 0.20.1: the "breaks them" rationale no longer
-holds.** Fed a multi-statement inline lambda, this formatter version reflows it
-cleanly — it lifts `func(p):` onto its own line and re-indents the body
-consistently, and the result parses (`godot --check-only` exit 0). So on a current
-toolchain S1 is no longer about the formatter corrupting indentation; it stands on
-the *other* grounds — an extracted named method is testable in isolation, reads
-better, and shows up in stack traces. Keep the rule for those reasons, not the
-formatter-breakage one.
+But that's a judgment call, not a rule. The real lambda foot-gun is capture
+semantics, below.
 
 ### H6 — Capture by-value for locals, by-ref for members
 
@@ -463,7 +449,7 @@ print(count)  # 0
 
 # Good — `_count` is a member, mutated through self.
 var _count: int = 0
-arr.for_each(func(item): _count += 1)   # single-expr lambda (S1-exempt)
+arr.for_each(func(item): _count += 1)   # inline lambda — fine
 print(_count)  # arr.size()
 ```
 

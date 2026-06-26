@@ -14,7 +14,6 @@ the recall backstop. When a construct is ambiguous, stay silent.
 Rules (cite the corpus):
   H1   no ':='            — always 'var x: Type = value' (type-async.md)
   H2   typed 'for'        — 'for item: Type in ...' (type-async.md)
-  S1   no inline lambda   — extract to named method (type-async.md)
   C1   no 'const Packed*' — reports byte-count size, reads 0.0 (engine-bugs.md)
   D7b  value-only 'match' — use if/elif (~5x dispatch overhead) (dod.md)
   S6   Array[primitive]    — prefer Packed*Array (style.md)
@@ -122,7 +121,6 @@ def mask_code(lines: list[str]) -> list[str]:
 
 _RE_WALRUS = re.compile(r":=")
 _RE_FOR_UNTYPED = re.compile(r"\bfor\s+[A-Za-z_]\w*\s+in\b")
-_RE_LAMBDA = re.compile(r"\bfunc\s*\(")
 _RE_CONST_PACKED = re.compile(r"\bconst\b.*\bPacked\w+Array\b")
 _RE_SIZE_ZERO = re.compile(r"\.size\(\)\s*[=!]=\s*0\b")
 _RE_EMPTY_CMP = re.compile(r"""[=!]=\s*&?(?:""|'')""")
@@ -206,8 +204,7 @@ _RE_POP_FRONT = re.compile(r"\.pop_front\(\s*\)|\.pop_at\(\s*0\s*\)")
 # yields an unstable / wrong sort. Scoped to an INLINE lambda comparator
 # (sort_custom(func ...)) carrying a non-strict operator on the same line — the
 # one form a line linter can see. A named-function comparator's body is out of
-# view (the reviewer's job). S1 also fires on the inline lambda (extract it);
-# C11 is the orthogonal correctness concern on the operator itself.
+# view (the reviewer's job). C11 is the correctness concern on the operator.
 _RE_SORT_CUSTOM_LAMBDA = re.compile(r"\bsort_custom\s*\(\s*func\b")
 _RE_NONSTRICT_CMP = re.compile(r"[<>]=")
 
@@ -248,39 +245,6 @@ def rule_h1(raw: str, m: str) -> str | None:
 def rule_h2(raw: str, m: str) -> str | None:
     if _RE_FOR_UNTYPED.search(m):
         return "H2: type the loop var — 'for item: Type in ...' (untyped iter defeats optimization)"
-    return None
-
-
-def _match_paren(s: str, open_idx: int) -> int | None:
-    # index of the ')' matching the '(' at open_idx, or None if unbalanced on s.
-    depth = 0
-    for i in range(open_idx, len(s)):
-        if s[i] == "(":
-            depth += 1
-        elif s[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-    return None
-
-
-def rule_s1(raw: str, m: str) -> str | None:
-    # Flag only MULTI-STATEMENT inline lambdas (body on the following lines) —
-    # those are what the formatter reflows and what's worth extracting (style.md
-    # S1 / bible §02). A single-expression lambda `func(x): return x.id` is
-    # explicitly NOT the target: content after the head ':' on the same line
-    # exempts it.
-    for mo in _RE_LAMBDA.finditer(m):
-        close = _match_paren(m, mo.end() - 1)
-        if close is None:
-            continue
-        k = close + 1
-        while k < len(m) and m[k] in " \t":
-            k += 1
-        if k >= len(m) or m[k] != ":":
-            continue                       # not a `func(...):` lambda head
-        if m[k + 1:].strip() == "":        # nothing after ':' → multi-statement
-            return "S1: no inline lambda — extract to a named method (formatter reflows multi-statement bodies; a single-expr `func(x): expr` is fine)"
     return None
 
 
@@ -420,7 +384,6 @@ LINE_RULES: dict[str, object] = {
     "H1": rule_h1,
     "H2": rule_h2,
     "H4": rule_h4,
-    "S1": rule_s1,
     "C1": rule_c1,
     "C3": rule_c3,
     "C14": rule_c14,
@@ -449,7 +412,7 @@ CATEGORY: dict[str, str] = {
     "H1": "PERF", "H2": "PERF", "S6": "PERF", "D7b": "PERF", "P12a": "PERF",
     "L1": "PERF", "L2": "PERF", "P22": "PERF", "P6": "PERF", "H14": "PERF",
     "S11": "PERF",
-    "S1": "STYLE", "S6b": "STYLE", "S15": "STYLE", "L3": "STYLE",
+    "S6b": "STYLE", "S15": "STYLE", "L3": "STYLE",
 }
 
 
@@ -599,8 +562,8 @@ def find_redundant_as_after_is(masked: list[str]) -> list[tuple[int, str]]:
 # run, signals wired in _ready aren't connected yet. Use call_deferred() or a
 # separate coroutine kicked off from _ready (type-async.md M1). Block-scanned:
 # any `await` at deeper indent than the `func _ready(` header belongs to its body
-# (GDScript has no nested named funcs; an inline lambda there is S1's problem and
-# still runs in the _ready frame). `await` elsewhere is fine — only _ready gated.
+# (GDScript has no nested named funcs; an inline lambda there still runs in the
+# _ready frame). `await` elsewhere is fine — only _ready gated.
 _RE_FUNC_READY = re.compile(r"^(\s*)func\s+_ready\s*\(")
 _RE_AWAIT = re.compile(r"\bawait\b")
 

@@ -49,7 +49,6 @@ Each finding prints `path:line: RULE [CATEGORY]: message`.
 | S6 | PERF | block | `Array[primitive]` where a `Packed*Array` exists |
 | D7b | PERF | block | value-only `match` (~5× dispatch vs `if/elif`) |
 | P12a | PERF | block | bare string to a `StringName` param, or typed `StringName`/`NodePath` decl init (use `&"x"` / `^"a/b"`) |
-| S1 | STYLE | block | inline lambda (extract to a named method) |
 | S6b | STYLE | block | redundant `Packed*Array()` / `([...])` constructor on a typed assign |
 | S15 | STYLE | block | `== ""` / `.size() == 0` instead of `.is_empty()` |
 | L1 | PERF | advisory | `range(coll.size())` index loop (iterate directly — measured ~1.3×) |

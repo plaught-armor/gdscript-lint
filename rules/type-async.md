@@ -4,8 +4,6 @@
 
 **Typed `for` loops** (H2) — `for item: Type in collection`. Untyped iter defeats optimization.
 
-**No inline lambdas** (S1) — `gdscript-formatter` breaks indentation. Extract to named methods.
-
 **Lambda captures by-value for locals, by-ref for members** ([#69014](https://github.com/godotengine/godot/issues/69014), H6) — share state via member vars or mutable containers.
 
 **Concurrent coroutine race conditions** (M3) — non-deterministic resume. Use flag+poll.
