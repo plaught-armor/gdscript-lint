@@ -137,6 +137,55 @@ Per-frame fields shouldn't co-locate with load-time / once-per-event fields.
 - Move cold to shared `Resource` (`EnemyDef`), one per *kind*, referenced by N runtime enemies.
 - GDScript-specific: Variant boxing dominates cache effects, but every hot-loop field access still walks property table. Smaller hot objects = less per-tick overhead. Shared `EnemyDef` = N enemies of one kind share one set of design-time fields → cheaper memory + mod-overridable in one place.
 
+## D5a — Hot-record field budget
+
+D5 says split hot from cold. D5a is the **number** that says when, plus the
+field-*type* rule. Scope: a `RefCounted` on a **hot alloc path** — constructed
+repeatedly (per-frame `Event`/`Result`, per-hit record, not-yet-pooled entity).
+One-shot `Def`/config/registry entries are exempt — built once, field count is
+free, ignore this rule.
+
+**Measured (4.8.dev, `tests/bench_refcounted_alloc.gd` + `bench_refcounted_vartype.gd`,
+N=1M, best-of-7):**
+
+- **Methods are free.** `.new()` cost flat across 0→200 methods (171→165 ns) —
+  methods live on the shared script, never per-instance. **Never limit method
+  count for alloc reasons.**
+- **Fields are the whole cost,** ~linear: `cost(V) ≈ 165 + per_field·V` ns.
+- **Field *type* splits two tiers** (per-var-of-type, 20 vars/class):
+
+  | tier | types | ns/var |
+  |---|---|---|
+  | inline-in-Variant | int, float, bool, Vector2/3/4, Color, **Transform3D, Basis**, String `""`, StringName, object-ref, null | ~31–46 |
+  | heap-backed container | `Array`, `Dictionary`, `Packed*Array`, **typed `Array[int]`** | ~75–114 |
+
+  The line is **inline-vs-heap, not POD-vs-non-POD** — even big math structs
+  (Transform3D/Basis ~46 ns) are cheap; a container field allocates backing
+  storage per instance even when empty → 2–3×. Counterintuitive: typed
+  `Array[int]` (114 ns) costs *more* to construct than untyped `Array` (75) —
+  typed wins at access/iter, loses at construction.
+
+**The budget.** A 60fps frame = 16.67M ns. Holding alloc < 5% frame:
+
+| allocs/frame | max inline fields | verdict |
+|---|---|---|
+| ~100 | ~170 | field count irrelevant — don't limit |
+| ~1,000 | ~16 | budget bites — D5a applies |
+| ~10,000 | <0 (empty already over) | must pool (P21); trimming fields won't save you |
+
+**Rule:**
+
+> Hot-alloc `RefCounted`: **≤ 16 fields, all inline-tier** (scalar / vector /
+> color / enum-int / object-ref / String / StringName). **Zero heap-container
+> members** (`Array` / `Dictionary` / `Packed*`). Methods unlimited.
+
+A heap-container field on a hot record is both the 2–3× tax *and* a smell: that
+record carries a collection owned by a manager's table (D4) — move it out, store
+an **ID** (D3) into the owning container. Over budget on inline fields, or
+allocating >1k/frame → hot/cold split (D5), reference-by-ID (D3), or pool (P21).
+The asymmetry to remember: **fat behavior + thin data is the cheap shape** —
+methods cost nothing at `new()`, fields cost everything.
+
 ## D6 — Transforms over methods
 
 Behavior = `(input data) → (output data)`. Not `data.apply_to(target)`.

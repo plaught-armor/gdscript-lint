@@ -383,6 +383,25 @@ Parent scene-root calls `_hud.init_hud(...)` once. Controllers borrow widgets
 via `_hud.get_*()` getters (null-safe wrappers like `is_interact_menu_open()`
 for gating sites). 5 `@onready` → 1 `_hud` ref on parent.
 
+**`@onready var _x = $Path` vs `@export var _x: T` for the widgets themselves.**
+The example wires each widget with `@onready var _reticle: Reticle = $Reticle` —
+a hardcoded node path. That's the right default *once the HUD's own subtree has
+settled*: the path is short, local to the scene, and reads as intent. But the
+path is a string baked into the script, and the engine doesn't know it refers to
+a node — rename `$Reticle` to `$ReticleRoot` in the scene, or reparent it one
+level, and `@onready var _reticle = $Reticle` silently resolves to `null` and
+fails at first access, not at edit time. While the HUD layout is still in flux —
+widgets getting added, regrouped under containers, renamed — prefer
+`@export var _reticle: Reticle` and wire each ref in the inspector. An exported
+node reference is a real link the editor *tracks*: move or rename the node and
+Godot rewrites the reference for you, so a tree restructure doesn't break the
+HUD. The cost is that the wiring lives in the `.tscn`, not the script, so it's
+less visible in a diff. The rule of thumb: `@export` node refs while the layout
+is undecided and paths churn; collapse to `@onready $Path` once the subtree is
+stable and you want the wiring legible in the script. (This is the *own-child*
+case — distinct from M11, which is about *sibling/cross-system* refs, where typed
+`init_*()` push-injection beats both.)
+
 This is **M11** (push-injection over `@export NodePath`) and **M12**
 (deferred-boot-check) cashing out together: typed `init_hud(...)` gives you
 compile-time errors on misconfig, and the facade pattern means a controller

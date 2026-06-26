@@ -331,6 +331,70 @@ Stays **advisory**: the linter can't see the surrounding loop or the array's
 runtime length, and a front-dequeue of a few dozen items is genuinely free —
 blocking would be noise. The number above is what makes the advice actionable.
 
+## RefCounted `.new()` cost — D5a hot-record field budget (bench_refcounted_alloc.gd + bench_refcounted_vartype.gd)
+
+Backs **D5a**. Question: what makes a `RefCounted` expensive to allocate
+repeatedly — field count, method count, or field type? N=1M, best-of-7,
+each iter overwrites `_hold` so the prior instance frees (alloc+free per iter).
+
+Methodology note: the bench calls `klass.new()` through a stored `GDScript` ref
+(one path for every variant). Measured offset vs a literal `Foo.new()` bytecode
+site = **4.4 ns** (158.9 vs 163.3 ns/new on `Empty`, N=5M) — negligible, and it
+cancels entirely in every difference-vs-empty figure below. Absolute numbers ≈
+literal-callsite cost; the per-var and per-type columns are exact.
+
+### Run
+
+```bash
+godot --headless --script tests/bench_refcounted_alloc.gd     # field-count + method-count
+godot --headless --script tests/bench_refcounted_vartype.gd   # field-type (20 vars/class)
+```
+
+### Field count vs method count (4.8.dev)
+
+| fields | ns/new | | methods | ns/new |
+|---|---|---|---|---|
+| 0 | 171 | | 0 | 171 |
+| 5 | 349 | | 20 | 164 |
+| 20 | 972 | | 50 | 164 |
+| 50 | 2505 | | 100 | 167 |
+| 100 | 4938 | | 200 | 165 |
+
+- **Methods free.** Flat 0→200 methods — they live on the shared script, never
+  per-instance. Combined `100 var + 100 fn` (4967 ns) ≈ `100 var` alone (4938).
+- **Fields ~linear,** `cost ≈ 165 + ~48·V` ns (mixed types).
+
+### Field type (20 vars/class, base 164.8 ns, per-var-of-type)
+
+| tier | type | ns/var |
+|---|---|---|
+| inline | variant null / RefCounted-null | 31 / 36 |
+| inline | int / float / bool | 38–40 |
+| inline | Vector2/3/4 / Color | 38–41 |
+| inline | String `""` / StringName | 42 / 44 |
+| inline | Transform3D / Basis | 46 / 46 |
+| **heap** | Array `[]` | **75** |
+| **heap** | Dictionary `{}` | **80** |
+| **heap** | PackedInt32 / PackedByte | **107 / 109** |
+| **heap** | typed `Array[int]` | **114** |
+
+- **Variant flattens POD** — int/float/vector/color all ~38–41 ns, ~3 ns spread.
+  Even Transform3D/Basis only ~46. The split is **inline-vs-heap, not
+  POD-vs-non-POD**.
+- **Heap containers 2–3×** — alloc backing per instance even when empty.
+- **Typed `Array[int]` (114) > untyped `Array` (75)** — typed costs *more* to
+  construct (wins at access/iter, loses at build).
+
+### Verdict → D5a
+
+Hot-alloc `RefCounted`: **≤ 16 inline-tier fields, zero heap-container members,
+methods unlimited.** Budget: at ~1k allocs/frame, ~16 inline fields ≈ 5% of a
+60fps frame; past ~10k/frame even an empty `RefCounted` blows budget → pool
+(P21), don't trim fields. Full rule + rationale in `rules/dod.md` D5a.
+
+Not a lint rule — needs the field's static type *and* the call-site alloc rate,
+neither visible to gd-lint. Reviewer/design call, like D5.
+
 ## Promotion criterion
 
 Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:
