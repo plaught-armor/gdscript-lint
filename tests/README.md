@@ -44,6 +44,7 @@ Each finding carries a category — **CORRECT** (bug), **PERF** (speed), **STYLE
 | P12a | `p12a.gd`     | bare string to StringName method flagged; `&"x"` / excluded `get` not |
 | P6   | PERF (advisory) | `p6.gd` | `.pop_front()` / `.pop_at(0)` flagged; `pop_back()` / `pop_at(2)` / string-literal `pop_front(` not |
 | H14  | PERF (advisory) | `h14.gd` | `(x as T)` in an `if x is T:` block flagged; `var s: T = x as T` binding / no-guard downcast / different-type cast / compound guard not |
+| P19  | PERF (advisory) | `p19.gd` | pass-through lambda `func(a): f(a)` forwarding params to a named fn flagged; reference passed directly / real inline body / partial application / reordered args / method-on-param / zero-arg thunk not |
 | —    | `suppress.gd` | `# gdlint: ignore[H1]` and bare `# gdlint: ignore` suppress |
 | —    | `disabled.gd` | `# gdlint: disable-file` skips the whole file |
 

@@ -92,36 +92,36 @@ common assumption ("`match` is the clean fast one") is wrong.
 Branching on the value of one discriminator (a type code, enum, tag) is the most
 common dispatch in gameplay code. The conventional choices are `match`, an
 `if/elif` chain, or an `Array[Callable]` "jump table." Measured
-(`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, 3 runs, **Godot 4.8.dev**;
-baseline = `Array[Callable]` index = 1.00×, higher = faster):
+(`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, median of 5 runs, **Godot
+4.8.dev**; baseline = `Array[Callable]` index = 1.00×, higher = faster):
 
 | Construct | vs Callable table |
 |---|---|
 | `Array[Callable]` index | 1.00× |
-| `match` + direct call | **0.67×** — *slower* than the Callable it would replace |
-| `if/elif` + direct call | 1.03× |
-| `if/elif` + inline body (no call) | **~2.4×** |
-| `match`, 6 arms, hit the last | **0.41×** |
-| `if/elif`, 6 arms, hit the last | 0.78× |
+| `match` + direct call | **0.64×** — *slower* than the Callable it would replace |
+| `if/elif` + direct call | 1.01× |
+| `if/elif` + inline body (no call) | **~2.1×** |
+| `match`, 6 arms, hit the last | **0.37×** |
+| `if/elif`, 6 arms, hit the last | 0.73× |
 
 **In plain terms:** higher is faster. The Callable-table row is set to 1.00 so
-everything else is a multiplier on it. So `match + call` at 0.67× is running about
-two-thirds as fast as the Callable table; `if/elif` with the body inlined at ~2.4×
+everything else is a multiplier on it. So `match + call` at 0.64× is running about
+two-thirds as fast as the Callable table; `if/elif` with the body inlined at ~2.1×
 is more than twice as fast. The 6-arm rows show what happens when the answer is
-the *last* arm checked — `match` drops to 0.41× (it slows down a lot as the list
-grows), while `if/elif` only drops to 0.78×.
+the *last* arm checked — `match` drops to 0.37× (it slows down a lot as the list
+grows), while `if/elif` only drops to 0.73×.
 
 Two findings most people get wrong:
 
 1. **There is no cheap "jump table" in interpreted GDScript.** `Array[Callable]`
    indexing isn't free, and `match` is *worse* than it at every arm count. The
    only construct that clearly beats the Callable table is an `if/elif` chain with
-   the **body inlined** (no call) — ~2.4×.
+   the **body inlined** (no call) — ~2.1×.
 2. **A value-only `match` is the slowest option, and it degrades with arm count.**
    Each arm carries pattern-matching machinery (type test, destructure, bind) even
    when you use none of it, and arms are scanned in order: at 3 arms `match` is
-   ~1.5× slower than `if/elif`+call (0.67 vs 1.03); at 6 arms hitting the last,
-   ~1.9× slower (0.41 vs 0.78).
+   ~1.5× slower than `if/elif`+call (0.64 vs 1.01); at 6 arms hitting the last,
+   ~2× slower (0.37 vs 0.73).
 
 **In plain terms:** `match` looks like a clean `switch` from other languages, but
 in GDScript it isn't one — it's the *pattern-matching* construct, and every arm
@@ -145,31 +145,53 @@ an object, a singleton, a name-lookup, or a list of subscribers all add bookkeep
 on the way in. The table below shows how much each step adds.
 
 Every layer between the call site and the code costs. Measured
-(`bench_dispatch_mechanism.gd`, 600k iters, best-of-7, 3 runs, **Godot 4.8.dev**;
-baseline = a hand-inlined expression = 1.00×, higher = slower). The inline
-baseline is deliberately trivial (`acc += i + 1`), so these ratios are an *upper
-bound* on relative overhead — the durable findings are the ordering and the signal
-scaling, both stable across runs:
+(`bench_dispatch_mechanism.gd`, 600k iters, best-of-7, median of 5 runs with the
+one contended outlier run discarded, **Godot 4.8.dev**; baseline = a hand-inlined
+expression = 1.00×, higher = slower). The inline baseline is deliberately trivial
+(`acc += i + 1`), so these ratios are an *upper bound* on relative overhead. The
+absolute ratios drift **±~20% between builds and runs** — the durable findings are
+the **ordering** and the **tiers**, both stable across runs (e.g. the
+autoload/instance ratio holds at ~1.1× even when both absolutes shift):
 
 | Path | × inline |
 |---|---|
 | inlined expression | 1.00 |
-| `static func` on a `class_name`'d RefCounted | ~4.1 |
-| instance method on a cached ref | ~5.3 |
-| autoload global identifier (`Bus.method()`) | ~5.7 |
-| `get_node(^"X").method()` per call | ~9.8 |
-| `signal.emit()`, 1 listener | ~9.5 |
-| `signal.emit()`, 4 listeners | ~23 |
+| `static func` on a `class_name`'d RefCounted | ~3.3 |
+| lambda `.call`, no capture | ~3.6 |
+| static fn passed as a `Callable` (`cb = Helper.add`) | ~3.8 |
+| lambda `.call`, captures a local | ~3.9 |
+| instance method on a cached ref | ~4.3 |
+| method-reference `Callable.call` (`obj.method` as a value) | ~4.7 |
+| autoload global identifier (`Bus.method()`) | ~4.8 |
+| lambda wrapping a named fn (`func(x): f(x)`) | ~6.5 |
+| `get_node(^"X").method()` per call | ~7.8 |
+| `signal.emit()`, 1 listener | ~7.6 |
+| `signal.emit()`, 4 listeners | ~19 |
 
 (The autoload row needs a real project with a registered `[autoload]`, so it's
-measured separately — `tests/autoload_bench_proj/` — against the same inline
-baseline.)
+measured separately — `tests/autoload_bench_proj/`, same session — and normalized
+to this baseline via its own re-measured inline/instance rows; the durable fact is
+autoload ≈ 1.1× a cached instance call, not the exact ratio.)
+
+The lambda/Callable rows are the addition. The findings: a **bare lambda call
+sits in the static/instance tier** (~3.6×) — using a lambda as a predicate/comparator
+is a normal indirect call, not expensive. **Capturing a local adds ~10%** (3.6 →
+3.9). A **method-reference Callable** (`obj.method` passed as a value) costs a touch
+more than calling the method directly (~4.7 vs ~4.3) — binding the object each call.
+The one real anti-pattern is **wrapping a named function in a pass-through lambda**
+(`func(x): return f(x)`): it double-dispatches — the `Callable.call` to the lambda
+*plus* the inner call. The honest comparison is against the alternative you'd
+otherwise write — **passing that same function as a `Callable` directly** (`cb =
+Helper.add`, ~3.8×): the wrapper is **~6.5× vs ~3.8×, i.e. ~1.7× the cost for zero
+benefit**. If you already have a named function, **pass the reference** (`f`,
+`obj.method`), don't wrap it. → lint rule **P19** (advisory).
 
 **In plain terms:** in this table higher means *slower* (the opposite of 3b's
-table) — the inline baseline is 1.00, and ~4.1 means "about four times as long as
-just doing the work right there." So a static helper call costs ~4×, an instance
-method ~5×, an autoload ~6×, a `get_node()` lookup ~10×, and a signal emit with
-four listeners ~23×. Same answer at the end, very different cost to *get* to it.
+table) — the inline baseline is 1.00, and ~3.3 means "about three times as long as
+just doing the work right there." So a static helper call costs ~3×, a lambda or
+instance method ~3.5–4.5×, an autoload ~4.8×, a `get_node()` lookup ~7.8×, and a
+signal emit with four listeners ~19×. Same answer at the end, very different cost
+to *get* to it.
 
 **In plain terms:** the further the engine has to travel to find the code you want
 to run, the more it costs. Inlining the work is free — there's nothing to find. A
@@ -182,11 +204,15 @@ bookkeeping.
 Takeaways:
 
 - **Cache node refs.** `get_node()` per call is ~2× worse than calling through a
-  cached reference (~9.8 vs ~5.3) — `@onready` it once so the lookup happens a
+  cached reference (~7.8 vs ~4.3) — `@onready` it once so the lookup happens a
   single time, not every frame. → lint rule **(P3, reviewer)**.
 - **A stateless helper belongs on a `class_name`'d RefCounted as a `static func`**
-  (~4.1×) — the cheapest indirection here, cheaper than an instance method (~5.3×)
-  or an autoload (~5.7×).
+  (~3.3×) — the cheapest indirection here, cheaper than an instance method (~4.3×)
+  or an autoload (~4.8×).
+- **A lambda is not expensive to call** (~3.6×, same tier as a method) — but
+  don't wrap a named function in one (`func(x): f(x)` is ~6.5×, vs ~3.8× to pass
+  that fn as a Callable directly — ~1.7× for nothing); pass the reference.
+  → **P19** (advisory).
 - **Signals decouple; they do not speed.** Emitting to even one listener costs
   about as much as a `get_node()` call, and it scales with listener count — four
   listeners is ~2.4× the one-listener cost. The reason to use a signal is that the

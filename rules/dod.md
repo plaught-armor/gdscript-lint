@@ -260,18 +260,18 @@ String-literal returns are interned, so the dispatch is cheap. Boot validate fir
 
 **Bytecode:** a `match` arm compiles to ~10 VM opcodes (typeof check + value compare + bool materialize + branch) — it carries pattern-matching machinery (destructure, bind, type-test) even when you use none of it. An `if/elif` branch is ~2. Interpreted GDScript pays per opcode → value `match` ≈ 5× the dispatch overhead of the equivalent `if` chain.
 
-**Measured** (`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, all surrounding work held identical, vs `Array[Callable]` index baseline = 1.00×):
+**Measured** (`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, median of 5 runs, all surrounding work held identical, vs `Array[Callable]` index baseline = 1.00×; absolute ratios drift ±~20% build-to-build, the ordering is the durable finding):
 
 | construct | vs Callable jump-table |
 |---|---|
 | `Array[Callable]` index ("jump table") | 1.00× |
-| `match` + direct call | 0.83× — slower than the Callable it would replace |
-| `if-elif` + direct call | 1.00× |
-| `if-elif` + inline read | 1.44× |
-| `match`, 6 arms, hit last | 0.62× — linearity brutal |
-| `if-elif`, 6 arms, hit last | 1.30× — linearity cheap |
+| `match` + direct call | 0.64× — slower than the Callable it would replace |
+| `if-elif` + direct call | 1.01× |
+| `if-elif` + inline read | 2.13× |
+| `match`, 6 arms, hit last | 0.37× — linearity brutal |
+| `if-elif`, 6 arms, hit last | 0.73× — linearity cheap |
 
-Two takeaways: (1) no real jump table exists in interpreted GDScript — even `Array[Callable]` indexing isn't O(1)-cheap, and `match` is worse than it; (2) `if/elif` lets you inline the arm body (no `Callable.call`, no call frame) — where the real 1.44× win lives.
+Two takeaways: (1) no real jump table exists in interpreted GDScript — even `Array[Callable]` indexing isn't O(1)-cheap, and `match` is worse than it; (2) `if/elif` lets you inline the arm body (no `Callable.call`, no call frame) — where the real ~2.1× win lives.
 
 **Nuance — hoist a computed subject.** `match x` evaluates `x` once; a naive `if x == A: elif x == B:` re-evaluates per branch. When the subject is computed (`typeof(v)`, `reader.get_method()`, `outcome.value`), assign to a typed local first, then branch on the local:
 
@@ -300,22 +300,28 @@ So a manager-of-Nodes earns its keep by **doing less**, not by cheaper dispatch:
 
 ## D9 — Static-on-RefCounted vs autoload Node
 
-Measured Godot 4.8.dev (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, best-of-7; see bible Part III §2). Supersedes the older 4.7-beta run — absolute ratios spread wider and the instance/autoload order flipped (instance method now edges out the autoload):
+Measured Godot 4.8.dev (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, best-of-7, median of 5 runs; see bible Part III §2). Absolute ratios drift ±~20% build-to-build — the durable findings are the **ordering** and **tiers** (instance method edges out the autoload; autoload ≈ 1.1× a cached instance call regardless of the absolute):
 
 | Dispatch | × inline |
 |---|---|
 | inline | 1.00 |
-| `static func` on `class_name`d RefCounted | ~4.1 |
-| instance method on cached ref | ~5.3 |
-| autoload global ident (`SoundBus.emit(...)`) | ~5.7 |
-| `get_node(^"AutoloadName").method()` per call | ~9.8 |
-| signal_emit, 1 listener | ~9.5 |
-| signal_emit, 4 listeners | ~23 |
+| `static func` on `class_name`d RefCounted | ~3.3 |
+| lambda `.call`, no capture | ~3.6 |
+| static fn as a `Callable` (`cb = Helper.add`) | ~3.8 |
+| lambda `.call`, captures a local | ~3.9 |
+| instance method on cached ref | ~4.3 |
+| method-ref `Callable.call` (`obj.method` as value) | ~4.7 |
+| autoload global ident (`SoundBus.emit(...)`) | ~4.8 |
+| lambda wrapping a named fn (`func(x): f(x)`) | ~6.5 |
+| `get_node(^"AutoloadName").method()` per call | ~7.8 |
+| signal_emit, 1 listener | ~7.6 |
+| signal_emit, 4 listeners | ~19 |
 
 - Pure-fn helper → `class_name FooSystem extends RefCounted` + `static func` only. Never instantiate.
 - Cache/registry/RNG seed/pub-sub signal → autoload Node (must be Node to own signals).
 - ⊥ resolve autoload via `get_node(^"X")` in hot paths — use global ident (cached at load).
 - Promotion: static-only → drop `static`, add to `[autoload]`. Callsites unchanged (`class_name` already global).
+- **Lambda dispatch**: a bare lambda `.call` sits in the static/instance tier (~3.6×) — fine as a predicate/comparator; capturing a local adds ~10%. ⊥ wrap a named fn in a pass-through lambda (`func(x): return f(x)`) — double-dispatch, ~6.5× vs ~3.8× to pass that same fn as a `Callable` directly (the real alternative), ~1.7× for nothing; pass the reference (`f` / `obj.method`). Flagged **P19** (advisory). Inline-body vs extract-to-named-method is perf-neutral (the dead S1 rule had no perf successor) — choose on readability.
 
 ## P18 — Signals decouple, don't speed
 

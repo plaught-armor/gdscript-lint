@@ -397,7 +397,39 @@ for object fields — so a counter you increment inside the lambda may not actua
 go up where the caller can see it.
 
 Lambdas are ordinary GDScript closures — use them freely. The one foot-gun worth
-knowing is capture semantics.
+knowing is capture semantics. First, two things that are *not* foot-guns: how much
+a lambda costs to call, and whether to extract its body.
+
+### Lambda dispatch cost — a bare lambda call is cheap; one anti-pattern isn't
+
+Measured (`bench_dispatch_mechanism.gd` §2, 4.8.dev — see Part III §3c for the full
+dispatch table this slots into):
+
+- A **bare lambda `.call` (~3.6× inline) sits in the static-func / instance-method
+  tier.** Using a lambda as a `filter()`/`map()`/`sort_custom()` predicate is a
+  normal indirect call, not an expensive one.
+- **Capturing a local adds ~10%** (~3.6 → ~3.9×). Small.
+- **Extracting the body to a named method is perf-neutral** — a named method called
+  through the same higher-order path costs about the same as the inline-body lambda.
+  So inline-vs-extract is purely a readability / testability call. (This is the
+  measured epitaph for the retired S1 rule: it was a formatter workaround, and it
+  has no performance successor — there is no speed reason to prefer either form.)
+- **The one real anti-pattern: wrapping a named function in a pass-through lambda**
+  — `func(x): return f(x)`. That double-dispatches: the `Callable.call` to the
+  lambda *plus* the inner call to `f`. Measured against the **real alternative** —
+  passing that same `f` as a `Callable` directly (~3.8×) — the wrapper is ~6.5×,
+  **~1.7× the cost for nothing** (an extra GDScript frame between the `Callable`
+  invocation and `f`'s body). If you already have `f`, **pass the reference** —
+  `arr.map(f)`, not `arr.map(func(x): return f(x))`. And build the `Callable`
+  once — never reconstruct a lambda inside a hot loop (each rebuild is a fresh
+  allocation). Flagged **P19** (advisory).
+
+```gdscript
+# Bad — pass-through lambda double-dispatches.
+arr.map(func(x): return _double(x))
+# Good — pass the reference.
+arr.map(_double)
+```
 
 ### H6 — Capture by-value for locals, by-ref for members
 

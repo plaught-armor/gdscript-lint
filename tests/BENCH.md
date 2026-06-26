@@ -85,14 +85,15 @@ CORRECT rule (no perf claim, like C9): an untyped `signal foo(a, b)` can't be
 
 ## Dispatch & call-overhead (bench_dispatch_mechanism.gd)
 
-Backs Part III §1 (dispatch) + §2 (call overhead) of the bible. Previously the
-chapter cited numbers from Godot 4.7 with **no reproducible script**; this bench
-re-measures on the build we ship against. N=600k rows, best-of-7, 3 runs, Godot
-4.8.dev. Discriminators are read from a pre-filled `PackedInt32Array` so every
-variant pays the same key-fetch and the matched arm can't be constant-folded.
+Backs Part III §1 (dispatch) + §3c (call overhead) of the bible. N=600k rows,
+best-of-7, **median of 5 runs** (the one run hit by background contention is
+discarded — see below), Godot 4.8.dev (rebuilt 2026-06-26). Discriminators are
+read from a pre-filled `PackedInt32Array` so every variant pays the same key-fetch
+and the matched arm can't be constant-folded.
 
 ```bash
-godot --headless --script tests/bench_dispatch_mechanism.gd
+godot --headless --script tests/bench_dispatch_mechanism.gd      # §1 + §2
+godot --headless --path tests/autoload_bench_proj                # autoload row
 ```
 
 §1 dispatch (baseline = `Array[Callable]` index = 1.00×, **higher = faster**):
@@ -100,32 +101,52 @@ godot --headless --script tests/bench_dispatch_mechanism.gd
 | Construct | vs Callable | reading |
 |---|---|---|
 | `Array[Callable]` index | 1.00× | baseline |
-| `match` + direct call | **0.67×** | slower than the Callable it would replace |
-| `if/elif` + direct call | 1.03× | ~par with Callable |
-| `if/elif` + inline body | **~2.4×** | the only clear win — inlining beats the table |
-| `match`, 6 arms, hit last | **0.41×** | linear scan degrades hard |
-| `if/elif`, 6 arms, hit last | 0.78× | degrades too, but ~1.9× faster than `match` |
+| `match` + direct call | **0.64×** | slower than the Callable it would replace |
+| `if/elif` + direct call | 1.01× | ~par with Callable |
+| `if/elif` + inline body | **~2.1×** | the only clear win — inlining beats the table |
+| `match`, 6 arms, hit last | **0.37×** | linear scan degrades hard |
+| `if/elif`, 6 arms, hit last | 0.73× | degrades too, but ~2× faster than `match` |
 
 §2 call overhead (baseline = inline expr = 1.00×, **higher = slower**; trivial
-inline baseline → ratios are an upper bound on relative overhead):
+inline baseline → ratios are an upper bound on relative overhead). The
+lambda/Callable rows are the new addition:
 
 | Path | × inline | reading |
 |---|---|---|
 | inline | 1.00 | baseline (`acc += i + 1`) |
-| `static func` on RefCounted | ~4.1× | cheapest indirection |
-| instance method, cached ref | ~5.1× | |
-| `get_node()` per call | ~9.8× | ~2× a cached ref — cache it |
-| `signal.emit()`, 1 listener | ~9.5× | ≈ a `get_node()` call |
-| `signal.emit()`, 4 listeners | ~23× | scales ~linearly with listeners |
+| `static func` on RefCounted | ~3.3× | cheapest indirection |
+| **lambda `.call`, no capture** | **~3.6×** | static/instance tier — a lambda call is cheap |
+| **static fn as a `Callable`** (`cb = Helper.add`) | **~3.8×** | matched baseline for the wrapper tax below |
+| **lambda `.call`, captures a local** | **~3.9×** | capture adds ~10% |
+| instance method, cached ref | ~4.3× | |
+| **method-ref `Callable.call`** | **~4.7×** | `obj.method` as a value — bind cost over a direct call |
+| autoload global ident (`Bus.x()`) | ~4.8× | ≈ 1.1× a cached instance call (separate proj, normalized) |
+| **lambda wrapping a named fn** | **~6.5×** | double dispatch. vs ~3.8× to pass that fn as a Callable → **~1.7× tax → P19** |
+| `get_node()` per call | ~7.8× | ~2× a cached ref — cache it |
+| `signal.emit()`, 1 listener | ~7.6× | ≈ a `get_node()` call |
+| `signal.emit()`, 4 listeners | ~19× | scales ~linearly with listeners |
 
-Findings (vs the old 4.7 figures the chapter used to cite): the qualitative story
-is unchanged and **stronger** — `match` is the slowest value-dispatch at every arm
-count; inlining an `if/elif` body is the real speed win; signals are not a speed
-tool and scale with listener count. Magnitudes shifted (engine version + a more
-trivial inline baseline), which is exactly why the chapter is version-tagged.
-Not benched here: the autoload-global-identifier path (needs a project with a
-registered autoload, not a standalone `--script` run) — carried from the older
-ladder, flagged as un-re-measured.
+Findings:
+
+- **Qualitative story stable across runs:** `match` is the slowest value-dispatch
+  at every arm count; inlining an `if/elif` body is the real speed win; signals
+  are not a speed tool and scale with listener count.
+- **Lambda dispatch (new):** a bare lambda `.call` is in the static/instance tier
+  (~3.6×) — fine as a predicate. Capture +~10%. A method-reference Callable costs a
+  touch more than a direct call. **The wrapper tax must be measured against the
+  real alternative** — passing the same named fn as a `Callable` directly
+  (`cb = Helper.add`, ~3.8×), *not* against a bare inline-body lambda. Against that
+  matched baseline, **wrapping a named fn in a pass-through lambda is ~6.5× vs
+  ~3.8× — ~1.7× for zero benefit** (the extra GDScript frame the lambda inserts
+  between the `Callable` invocation and the fn body). Pass the reference; flagged
+  advisory **P19** (`tests/fixtures/p19.gd`). Inline-body vs extract-to-named-method
+  is perf-neutral — the retired S1 rule has no perf successor.
+- **Absolute ratios drift ±~20% between builds/runs.** This session's numbers run
+  ~0.8× the prior table's (today's rebuild); the **ordering and tiers are the
+  durable finding**, and ratios *between* rows hold (autoload ≈ 1.1× instance in
+  both datasets). One of the 5 runs always spiked high under a background file
+  indexer (baloo) churning the freshly-built binary — best-of-7 + median-of-5
+  discards it; if you reproduce, run on a quiet machine.
 
 ## Static typing, groups, convention dispatch, autoload
 

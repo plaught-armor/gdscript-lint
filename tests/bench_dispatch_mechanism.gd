@@ -17,6 +17,9 @@ const REPS: int = 7
 var _sink: float = 0.0
 var _keys3: PackedInt32Array = []
 var _keys6: PackedInt32Array = []
+var _lam: Callable = Callable()
+var _lam_cap: Callable = Callable()
+var _lam_wrap: Callable = Callable()
 
 
 # --- 3-arm dispatch targets ---
@@ -103,6 +106,14 @@ func _initialize() -> void:
 	print("  inline expression            = %7d us  1.00x" % inl)
 	_report2("static func on RefCounted", inl, _bench_static())
 	_report2("instance method, cached ref", inl, _bench_instance())
+	_lam = func(x: int) -> int: return x + 1
+	_lam_cap = _make_capturing()
+	_lam_wrap = func(x: int) -> int: return Helper.add(x)
+	_report2("lambda .call (no capture)", inl, _bench_lambda())
+	_report2("lambda .call (captures local)", inl, _bench_lambda_cap())
+	_report2("static fn via Callable .call", inl, _bench_static_callable())
+	_report2("lambda wraps static fn .call", inl, _bench_lambda_wrap())
+	_report2("method-ref Callable .call", inl, _bench_method_callable())
 	_report2("get_node() per call", inl, _bench_get_node())
 	_report2("signal.emit(), 1 listener", inl, _bench_signal(1))
 	_report2("signal.emit(), 4 listeners", inl, _bench_signal(4))
@@ -272,6 +283,84 @@ func _bench_instance() -> int:
 		var t0: int = Time.get_ticks_usec()
 		for i: int in N:
 			acc += inst.add(i)
+		best = _best(best, Time.get_ticks_usec() - t0)
+		_sink += float(acc)
+	return best
+
+
+func _make_capturing() -> Callable:
+	# Local captured by value (the common lambda-capture case, #69014 H6).
+	var cap: int = 1
+	return func(x: int) -> int: return x + cap
+
+
+func _bench_lambda() -> int:
+	# Inline-body lambda, captures nothing. Built once (realistic: filter()/map()
+	# build the Callable once, then call per element).
+	var best: int = 1 << 60
+	for rep: int in REPS:
+		var acc: int = 0
+		var t0: int = Time.get_ticks_usec()
+		for i: int in N:
+			acc += _lam.call(i)
+		best = _best(best, Time.get_ticks_usec() - t0)
+		_sink += float(acc)
+	return best
+
+
+func _bench_lambda_cap() -> int:
+	# Same call shape, body reads a captured local — isolates capture-read cost.
+	var best: int = 1 << 60
+	for rep: int in REPS:
+		var acc: int = 0
+		var t0: int = Time.get_ticks_usec()
+		for i: int in N:
+			acc += _lam_cap.call(i)
+		best = _best(best, Time.get_ticks_usec() - t0)
+		_sink += float(acc)
+	return best
+
+
+func _bench_lambda_wrap() -> int:
+	# Lambda whose body just calls a named fn — double dispatch (Callable + call).
+	var best: int = 1 << 60
+	for rep: int in REPS:
+		var acc: int = 0
+		var t0: int = Time.get_ticks_usec()
+		for i: int in N:
+			acc += _lam_wrap.call(i)
+		best = _best(best, Time.get_ticks_usec() - t0)
+		_sink += float(acc)
+	return best
+
+
+func _bench_method_callable() -> int:
+	# Named method reached through a method-reference Callable (vs direct call).
+	var inst: Inst = Inst.new()
+	var cb: Callable = inst.add
+	var best: int = 1 << 60
+	for rep: int in REPS:
+		var acc: int = 0
+		var t0: int = Time.get_ticks_usec()
+		for i: int in N:
+			acc += cb.call(i)
+		best = _best(best, Time.get_ticks_usec() - t0)
+		_sink += float(acc)
+	return best
+
+
+func _bench_static_callable() -> int:
+	# SAME callee as _bench_lambda_wrap (Helper.add), but passed as a Callable
+	# directly instead of wrapped in a lambda. This is the matched baseline for the
+	# wrapper tax: wrap (_bench_lambda_wrap) / pass-reference (this) isolates the
+	# one extra GDScript frame the wrapper lambda inserts. Neither captures self.
+	var cb: Callable = Helper.add
+	var best: int = 1 << 60
+	for rep: int in REPS:
+		var acc: int = 0
+		var t0: int = Time.get_ticks_usec()
+		for i: int in N:
+			acc += cb.call(i)
 		best = _best(best, Time.get_ticks_usec() - t0)
 		_sink += float(acc)
 	return best

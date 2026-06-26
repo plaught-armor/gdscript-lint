@@ -59,6 +59,7 @@ Each finding prints `path:line: RULE [CATEGORY]: message`.
 | H14 | PERF | advisory | `(x as T)` inside `if x is T:` — redundant cast, Variant round-trip |
 | H13 | CORRECT | advisory | `has_method(&"x")` + `call(&"x")` duck-dispatch (give targets a base class + `is`) |
 | S11 | PERF | advisory | `print()` inside `_process`/`_physics_process`/`_draw` — per-frame sync I/O |
+| P19 | PERF | advisory | pass-through lambda `func(a): f(a)` wrapping a named fn — pass the reference (double-dispatch, ~1.7× vs the reference) |
 
 **Blocking** = exit 1 (fail the gate). **Advisory** = printed with `[advisory]`,
 exit stays 0 — a non-blocking note. Advisory rules are perf/style preferences

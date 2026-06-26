@@ -34,6 +34,7 @@ Rules (cite the corpus):
   H4   signal foo(a, b)        — untyped signal params (#110573); type them
   H13  has_method+call pair    — duck-typed dispatch → base class + 'is' (advisory)
   S11  print() in _process     — per-frame sync I/O; gate/remove (advisory)
+  P19  func(a): f(a) wrapper   — pass the fn reference; wrapping double-dispatches (advisory)
 
 Each finding is labelled with a CATEGORY: CORRECT (bug / wrong result), PERF
 (speed), or STYLE (idiom). Output line: 'path:line: RULE [CATEGORY]: msg'.
@@ -307,6 +308,53 @@ def rule_h4(raw: str, m: str) -> str | None:
     return None
 
 
+# P19 (advisory PERF): a pass-through lambda — `func(args): [return] f(args)` that
+# forwards its params unchanged to a named function — double-dispatches (the
+# Callable.call to the lambda PLUS the inner call), ~1.7x vs passing that same fn
+# as a Callable directly (bench_dispatch_mechanism.gd §2, dod.md D9). Pass the reference
+# directly (`f`, `obj.method`). Flagged ONLY on the exact pure-forward shape: call
+# args == lambda params, same order, same count (>=1). Partial application
+# (extra/constant args), reordering, or a body doing anything else is not a
+# pass-through and is left alone. Single-line lambdas only — the shape this almost
+# always takes. Advisory: an intentional wrap (deferred eval, capturing self at a
+# chosen time) reads identically, so a human confirms.
+_RE_P19_LAMBDA = re.compile(
+    r"\bfunc\s*\(([^()]*)\)\s*:\s*(?:return\s+)?"
+    r"([A-Za-z_][\w.]*)\s*\(([^()]*)\)\s*\)?\s*$"
+)
+
+
+def _lambda_param_names(param_src: str) -> list[str] | None:
+    # 'a: int, b = 3' -> ['a', 'b']; '' -> []; malformed -> None.
+    names: list[str] = []
+    for part in param_src.split(","):
+        part = part.strip()
+        if part == "":
+            continue
+        mo = re.match(r"[A-Za-z_]\w*", part)
+        if mo is None:
+            return None
+        names.append(mo.group(0))
+    return names
+
+
+def rule_p19(raw: str, m: str) -> str | None:
+    mo = _RE_P19_LAMBDA.search(m)
+    if mo is None:
+        return None
+    pnames = _lambda_param_names(mo.group(1))
+    if not pnames:                              # None (malformed) or 0 params
+        return None
+    callee = mo.group(2)
+    if callee.split(".")[0] in pnames:          # receiver/callee is a param — not a wrap
+        return None
+    aargs = [a.strip() for a in mo.group(3).split(",") if a.strip() != ""]
+    if aargs != pnames:                         # must forward params verbatim, in order
+        return None
+    return ("P19: pass-through lambda — pass '%s' directly, don't wrap it in "
+            "'func(...): %s(...)' (the wrapper double-dispatches, ~1.7x vs passing the reference)") % (callee, callee)
+
+
 def rule_s6(raw: str, m: str) -> str | None:
     if _RE_ARRAY_PRIM.search(m):
         return "S6: prefer Packed*Array over Array[primitive] (3-5x iter, no Variant boxing) — unless elements truly need Variant"
@@ -396,6 +444,7 @@ LINE_RULES: dict[str, object] = {
     "P6": rule_p6,
     "L1": rule_l1,
     "L3": rule_l3,
+    "P19": rule_p19,
 }
 
 # Advisory rules: surfaced but NOT edit-blocking. The loop-idiom rules (L1/L2/L3)
@@ -403,7 +452,7 @@ LINE_RULES: dict[str, object] = {
 # confirmed L1 (~1.3x) and P22 (~1.3x) but L1 carries FP and P22 can't tell
 # float from int — both advise, never block. L2/L3 are style only (perf
 # refuted). Promote out of this set only on a measured >=1.3x win + ~0 FP.
-ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14", "H13", "S11"}
+ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14", "H13", "S11", "P19"}
 
 # Category per rule: CORRECT (bug / wrong result), PERF (speed), STYLE (idiom).
 CATEGORY: dict[str, str] = {
@@ -411,7 +460,7 @@ CATEGORY: dict[str, str] = {
     "C11": "CORRECT", "M1": "CORRECT", "H4": "CORRECT", "H13": "CORRECT",
     "H1": "PERF", "H2": "PERF", "S6": "PERF", "D7b": "PERF", "P12a": "PERF",
     "L1": "PERF", "L2": "PERF", "P22": "PERF", "P6": "PERF", "H14": "PERF",
-    "S11": "PERF",
+    "S11": "PERF", "P19": "PERF",
     "S6b": "STYLE", "S15": "STYLE", "L3": "STYLE",
 }
 
