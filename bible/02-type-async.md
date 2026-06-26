@@ -389,40 +389,15 @@ which a text linter can't see — so this stays a reviewer / `style.md` **S9** c
 
 ---
 
-## 2d. Lambdas and capture semantics
+## 2d. Lambda capture semantics
 
 **In plain terms:** a lambda is a small inline function. The surprise that bites:
 the way a lambda "remembers" outside variables is different for local ones than
 for object fields — so a counter you increment inside the lambda may not actually
 go up where the caller can see it.
 
-Lambdas are fine to use in GDScript (an old rule against inline ones is retired —
-see below). The real foot-gun is capture semantics.
-
-### Inline lambdas are fine (the old S1 rule is retired)
-
-There was an S1 rule banning multi-statement inline lambdas, on the grounds that
-`gdscript-formatter` mangled their indentation. That rationale is **dead**: on a
-current toolchain (gdscript-formatter 0.20.1) the formatter reflows a
-multi-statement inline lambda cleanly — it lifts `func(p):` onto its own line,
-re-indents the body, and the result parses (`godot --check-only` exit 0). With
-the only hard, measurable reason gone, the rule is **retired** — inline lambdas
-are no longer flagged.
-
-Extracting a multi-statement body to a named method is still a reasonable
-*preference* — it's unit-testable in isolation and shows up in stack traces:
-
-```gdscript
-result.assign(queue.filter(_is_hostile_alive))
-
-func _is_hostile_alive(p: BattlePawn) -> bool:
-    if not is_instance_valid(p):
-        return false
-    return p.is_alive() and p.faction != faction
-```
-
-But that's a judgment call, not a rule. The real lambda foot-gun is capture
-semantics, below.
+Lambdas are ordinary GDScript closures — use them freely. The one foot-gun worth
+knowing is capture semantics.
 
 ### H6 — Capture by-value for locals, by-ref for members
 
@@ -449,7 +424,7 @@ print(count)  # 0
 
 # Good — `_count` is a member, mutated through self.
 var _count: int = 0
-arr.for_each(func(item): _count += 1)   # inline lambda — fine
+arr.for_each(func(item): _count += 1)   # member mutated through self
 print(_count)  # arr.size()
 ```
 

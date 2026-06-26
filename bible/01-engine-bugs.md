@@ -258,7 +258,7 @@ expect:
 ```gdscript
 arr.sort_custom(_by_priority)
 
-# Named comparator — clear for a multi-line tiebreaker (an inline lambda also works).
+# Named comparator with an explicit tiebreaker.
 func _by_priority(a: Pawn, b: Pawn) -> bool:
     if a.priority != b.priority:
         return a.priority < b.priority
