@@ -289,7 +289,7 @@ Plain param/local subjects need no hoist — compare directly. Don't alias a par
 
 ## D8 — Batched homogeneous processing > per-Node tick
 
-**Measured correction (4.8.dev, `bench_process_centralization_proj/`):** a manager looping nodes and calling `e.tick()` per entity is **~2× SLOWER** than per-node `_physics_process` — a GDScript method call (D9 ~5.3× tier) costs more than the engine's native callback, and the loop adds array overhead. Centralizing the *call* is a loss, not a win. The dispatch win exists **only for inline SoA**: a manager owning `Packed*Array`s and working them in a flat loop with **no per-entity calls** (~2.3× faster at light work, tapering to parity as work grows). "One vs a few" managers: no difference.
+**Measured correction (4.8.dev, `bench_process_centralization_proj/`):** a manager looping nodes and calling `e.tick()` per entity is **~2× SLOWER** than per-node `_physics_process` — a GDScript method call (D9 ~4.3× tier) costs more than the engine's native callback, and the loop adds array overhead. Centralizing the *call* is a loss, not a win. The dispatch win exists **only for inline SoA**: a manager owning `Packed*Array`s and working them in a flat loop with **no per-entity calls** (~2.3× faster at light work, tapering to parity as work grows). "One vs a few" managers: no difference.
 
 So a manager-of-Nodes earns its keep by **doing less**, not by cheaper dispatch:
 
@@ -344,7 +344,7 @@ Most dispatch cost invisible vs frame budget. Matters only in measured hot loops
 | 5 | Avoid alloc (Dict literals, `[]`/`{}`, `.new()`) in hot path | 2-10× | profiler-pointed |
 | 6 | Typed RefCounted records over Dictionaries | ~2-3× field access vs key hash | cross-fn results |
 | 7 | `Packed*Array` over `Array[float]`/`Array[int]` | 3-5× iter | bulk numeric |
-| 8 | Hand-inline the hot body | ~4.1× (removes a static-func call, 4.8.dev) | profiler-confirmed |
+| 8 | Hand-inline the hot body | ~3.3× (removes a static-func call, 4.8.dev) | profiler-confirmed |
 | 9 | GDExtension (C++) | 10-100× | last resort |
 | 10 | Lower tick / batch ticks (one EnemyManager loop vs per-Node) | linear w/ freq cut | N × per-frame cost = bottleneck |
 

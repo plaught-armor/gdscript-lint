@@ -182,13 +182,15 @@ best-of-7, 2–3 runs.
 | Path | × inline |
 |---|---|
 | inline | 1.00 |
-| static func | ~4.16 |
-| instance method | ~5.31 |
-| autoload global ident `Bus.x()` | ~5.71 |
+| static func | ~3.9 |
+| instance method | ~4.7 |
+| autoload global ident `Bus.x()` | ~5.3 |
 
 Autoload lands just above the instance-method tier and well below `get_node()`
-(~9.8× in the dispatch bench) — confirms "use the global ident, don't `get_node()`
-an autoload in a hot path."
+(~7.8× in the dispatch bench) — confirms "use the global ident, don't `get_node()`
+an autoload in a hot path." (This proj has its own inline baseline, so its absolute
+ratios sit a touch higher than the main dispatch bench; the durable fact is
+autoload ≈ 1.1× a cached instance call.)
 
 ## Dict access — P9 (bench_dict_access.gd)
 
@@ -250,7 +252,7 @@ baseline = per-node `_physics_process` = 1.00× (higher = faster than per-node):
 Three findings, stable across runs at N ∈ {1000, 10000}:
 
 1. **A manager that loops nodes calling `e.tick()` is ~2× SLOWER than per-node.**
-   A GDScript per-entity method call (`e.tick()`, the ~5.3×-inline instance-method
+   A GDScript per-entity method call (`e.tick()`, the ~4.3×-inline instance-method
    tier in §2's ladder) costs *more* than the engine's native `_physics_process`
    dispatch. You still pay N calls either way — and the loop adds array iteration
    on top. Centralizing the *call* buys nothing; it loses.

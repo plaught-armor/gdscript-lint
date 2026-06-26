@@ -91,8 +91,8 @@ along one axis: **does this need state?**
   autoload entry.**
 
 The autoload pays a per-call indirection cost (3c, measured 4.8.dev:
-autoload global identifier ≈ 5.7× inline; a static func on a `class_name`'d
-RefCounted ≈ 4.1×).
+autoload global identifier ≈ 4.8× inline; a static func on a `class_name`'d
+RefCounted ≈ 3.3×).
 That's a small constant, but the more important difference is *semantic*: an
 autoload exists in the SceneTree and can hold signals; a static-only RefCounted
 is purely a namespace for functions and constants. Reach for the autoload when

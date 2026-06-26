@@ -701,7 +701,7 @@ Two surprises:
 
 - **A manager looping nodes and calling `e.tick()` per entity is ~2× SLOWER than
   letting them self-process.** A GDScript instance-method call is the
-  ~5.3×-inline tier of 4h's ladder; the engine's native `_physics_process`
+  ~4.3×-inline tier of 4h's ladder; the engine's native `_physics_process`
   dispatch is cheaper. You pay N calls either way, and the loop adds array
   iteration on top. (This corrects an earlier toggle-in-one-scene repro that
   reported a slight manager *win* — an A/B-ordering artifact; see BENCH.md.)
@@ -775,12 +775,12 @@ lines, baseline = inlined expression = 1.00×:
 | Path | × inline |
 |---|---|
 | inlined expression | 1.00 |
-| `static func` on a `class_name`'d RefCounted | ~4.1 |
-| instance method on a cached ref | ~5.3 |
-| autoload global identifier (`Bus.method()`) | ~5.7 |
-| `get_node(^"X").method()` per call | ~9.8 |
-| `signal.emit()`, 1 listener | ~9.5 |
-| `signal.emit()`, 4 listeners | ~23 |
+| `static func` on a `class_name`'d RefCounted | ~3.3 |
+| instance method on a cached ref | ~4.3 |
+| autoload global identifier (`Bus.method()`) | ~4.8 |
+| `get_node(^"X").method()` per call | ~7.8 |
+| `signal.emit()`, 1 listener | ~7.6 |
+| `signal.emit()`, 4 listeners | ~19 |
 
 (The autoload row is measured in its own project, `tests/autoload_bench_proj/`,
 against the same inline baseline — autoload globals only exist when a real project
@@ -790,14 +790,14 @@ method on a globally-resolved singleton.)
 Rules of thumb:
 
 - **Pure-fn helper → `class_name FooSystem extends RefCounted` + `static func`
-  only** (~4.1×, the cheapest indirection measured). Never instantiate; you don't
-  want the call-site to drift to `FooSystem.new().method(...)` (~5.3×). `_init`
+  only** (~3.3×, the cheapest indirection measured). Never instantiate; you don't
+  want the call-site to drift to `FooSystem.new().method(...)` (~4.3×). `_init`
   doesn't exist on a class you never construct.
 - **Stateful (cache, registry, RNG seed, pub-sub signal) → autoload Node.**
   Signals require a Node owner; mutable shared state wants a clear lifecycle.
 - **Never resolve an autoload via `get_node(^"X")` in a hot path.** The autoload's
-  name is a *global identifier* (~5.7× inline); use it directly. Going through
-  `get_node()` instead is ~9.8× inline — about ~1.7× the cost of the global ident,
+  name is a *global identifier* (~4.8× inline); use it directly. Going through
+  `get_node()` instead is ~7.8× inline — about ~1.6× the cost of the global ident,
   because it walks the scene tree by name every call. → P3.
 - **Promotion path: static-only → autoload Node** is a one-line change. Drop
   `static`, add the `[autoload]` entry. Callsites unchanged because the
