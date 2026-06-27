@@ -553,6 +553,12 @@ MECHANISM — bare `InputEventKey`, no surrounding Node:
   distinct object per instance, and the same path becomes **3.5× *slower* than
   generating in code** (`inst_export_local` 3254 ns vs `inst_code` 922 ns) — the
   engine's per-instance sub-resource duplicate costs more than a GDScript `.new()`.
+  > **The one line to remember:** the inspector `@export` is not faster at
+  > *building* the object — it's faster at *not building* one (every instance shares
+  > the same one). The instant you need genuinely separate objects, code wins ~3.5×.
+  > And the speed the default "won" *is* the aliasing bug below — you didn't save
+  > construction, you skipped it and got one shared object you probably didn't mean
+  > to share. Decide on sharing semantics, never on the ns.
 - **So "export applied vs generate" decomposes by need, not by speed:**
   - need **one shared, never-mutated** config (a keybind template all nodes read) →
     inspector wins, it dedups to a single object.
