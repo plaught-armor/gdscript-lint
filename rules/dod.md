@@ -260,6 +260,8 @@ String-literal returns are interned, so the dispatch is cheap. Boot validate fir
 
 **Bytecode:** a `match` arm compiles to ~10 VM opcodes (typeof check + value compare + bool materialize + branch) — it carries pattern-matching machinery (destructure, bind, type-test) even when you use none of it. An `if/elif` branch is ~2. Interpreted GDScript pays per opcode → value `match` ≈ 5× the dispatch overhead of the equivalent `if` chain.
 
+> **Footnote ([#120660](https://github.com/godotengine/godot/pull/120660), 4.x):** compound `if` conditions got *cheaper still*. Pre-fix, `if a and b` materialized each operand's result into a temp before branching; the PR branches directly off the short-circuit → ~30-35% faster for a single `and`/`or`, bytecode up to 79% smaller, each extra operator costs 3 addresses not 14. **Does not change the `if/elif` vs `match` verdict** — the arms here are single compares (`if x == A`), unaffected. It only sharpens the model: where an arm *does* carry a compound guard (`if x == A and y > 0`), `if/elif`'s lead over `match` widens, since `match`'s `when` guard sees no such optimization. One more reason value dispatch stays in `if/elif`.
+
 **Measured** (`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, median of 5 runs, all surrounding work held identical, vs `Array[Callable]` index baseline = 1.00×; absolute ratios drift ±~20% build-to-build, the ordering is the durable finding):
 
 | construct | vs Callable jump-table |
