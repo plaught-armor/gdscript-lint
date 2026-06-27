@@ -1,0 +1,7 @@
+[gd_resource type="InputEventKey" format=3]
+
+[resource]
+keycode = 65
+physical_keycode = 65
+unicode = 97
+pressed = true

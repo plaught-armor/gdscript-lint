@@ -491,3 +491,93 @@ gap narrows with less redundancy, does not invert.
 
 These are CORRECT/PERF *knowledge*, not lint flags — recorded here so the
 persistence doc's numbers are reproducible, per the bible's measure-everything rule.
+
+---
+
+# Inspector-authored vs code-constructed object (`bench_input_construct_proj/`)
+
+Settles a recurring intuition: does configuring an object in the **inspector**
+(`@export` set in a `.tscn`) ahead of runtime *save the program the construction
+work*? No — a scene is **data on disk**, rehydrated on every load; the object is
+built each run either way. But the per-object cost of "export already applied" vs
+"generate in code" is **not one number** — it **inverts** on whether the inspector
+sub-resource is *shared* across instances or *distinct*. That inversion, not the
+raw construction cost, is the finding.
+
+```sh
+godot --headless --path tests/bench_input_construct_proj --import   # once
+godot --headless --path tests/bench_input_construct_proj -s bench_input_construct.gd
+# env: BENCH_ITERS (default 100000), BENCH_ROUNDS (best-of, min wins, default 7)
+```
+
+Measurement hygiene: each timed loop is **inline** (no per-op `Callable` — at
+~300 ns ops a `Callable.call` ~hundreds of ns would swamp and equalize the rows);
+OS page cache + ResourceLoader cache pre-warmed so `load_ignore` times
+parse+construct, not cold disk IO; a `_sink` accumulator defeats DCE.
+
+## Results (Godot 4.8.dev custom build)
+
+100k iters, best-of-7 (min wins). First, the crux — directly proven by comparing
+`get_instance_id()` of `ev` across two `instantiate()` calls:
+
+```
+node_export.tscn        ev shared = true     ← default sub-resource: ONE object, all instances alias it
+node_export_local.tscn  ev shared = false    ← resource_local_to_scene = true: distinct per instance
+```
+
+PRIMARY — scene `instantiate()` (Node alloc paid by all rows):
+
+| path | ns/op | vs code | object per instance |
+|---|---|---|---|
+| **inst_code** (generate in `_init`) | 921.8 | 1.00× | **distinct** |
+| inst_postload (generate via `build()` after load) | 967.0 | 1.05× | distinct — ≈ inst_code |
+| **inst_export** (export applied, default) | **633.9** | **0.69×** | **shared — one, aliased** |
+| **inst_export_local** (export applied, local-to-scene) | **3254.4** | **3.53×** | **distinct — engine dups each** |
+
+MECHANISM — bare `InputEventKey`, no surrounding Node:
+
+| path | ns/op | vs code | what it is |
+|---|---|---|---|
+| **code** | 302.6 | 1.00× | `.new()` + 4 field sets |
+| load_cached | 581.1 | 1.92× | `load()` in a loop — cache hit, shared instance |
+| duplicate | 2462.7 | 8.14× | `.duplicate()` of a held template |
+| load_ignore | 32709.0 | **108.09×** | fresh deserialize (parse text → construct → set) |
+
+## Conclusions
+
+- **The answer inverts on sharing — this is the headline.** An inspector `@export`
+  sub-resource is **shared across all scene instances by default** (`shared = true`
+  proven above). So `inst_export` is the *cheapest* row (0.69× of code) **not
+  because it builds faster** — it doesn't build per instance at all; `instantiate()`
+  ref-assigns the one cached object. Flip `resource_local_to_scene = true` to get a
+  distinct object per instance, and the same path becomes **3.5× *slower* than
+  generating in code** (`inst_export_local` 3254 ns vs `inst_code` 922 ns) — the
+  engine's per-instance sub-resource duplicate costs more than a GDScript `.new()`.
+- **So "export applied vs generate" decomposes by need, not by speed:**
+  - need **one shared, never-mutated** config (a keybind template all nodes read) →
+    inspector wins, it dedups to a single object.
+  - need **distinct, independently mutable** per instance → code generation wins
+    ~3.5×; the inspector path either aliases (wrong) or duplicates (slower).
+- **Default sharing is a correctness footgun, not just a perf note.** Configure
+  `ev` in the inspector on a scene instanced N times, mutate `ev.keycode` on one at
+  runtime → **all N change**, silently (it's one object). Want isolation →
+  `resource_local_to_scene = true` (eat the dup cost) or generate in code.
+- **Timing of generation is irrelevant.** `inst_postload` (build *after* load) is
+  within 5% of `inst_code` (build *in* `_init`) — same construction work, the
+  *when* doesn't move the number. "Load then generate" ≡ "generate during load."
+- **Frequency dominates anyway.** All of this is paid **once per instance per
+  launch**; for a handful of input events it's sub-millisecond, lost in scene-load
+  noise. `(unit) × (freq)` (inline-perf sanity rule) → choose on **mutation
+  semantics and data ownership (D1)**, never on these ns.
+- **MECHANISM table aside:** a cached `load()` is **not** free (1.9× a `.new()` —
+  the wrapper re-runs path-resolve + hash + cache probe every call), and a fresh
+  deserialize is **108× a `.new()`** — parsing from text is the expensive way to
+  build an object. Neither is hot in practice (you hold the ref after one load).
+- **Input specifically:** loose `InputEventKey` objects are the wrong shape for key
+  bindings either way — author actions in **InputMap** (boot-loaded, queried by
+  `Input.is_action_pressed(&"jump")`); build `InputEventKey` in code only to write
+  into the map at rebind time.
+
+CORRECT/PERF *knowledge*, not a lint flag — recorded so the inversion ("inspector
+`@export` is shared-and-cheap or distinct-and-pricier, never simply faster") is
+reproducible, per the measure-everything rule.
