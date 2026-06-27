@@ -426,3 +426,68 @@ Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:
 
 On current data only **L1** meets (1); it stays advisory on (2). L2/L3 meet neither —
 they remain advisory, style-only.
+
+---
+
+# Save serialization + compression — pick the encoder, justify zstd
+
+Backs [`bible/08-persistence.md`](../bible/08-persistence.md) §8d and
+[`rules/persistence.md`](../rules/persistence.md). Settles two save-path claims:
+which encoder for a Godot-only save, and whether/which compression is worth it —
+against the common wisdom that a *more compact wire format* makes the smallest
+save.
+
+## Run
+
+```bash
+godot --headless --path tests/bench_save_proj -s bench_save.gd
+# env: BENCH_N (inventory items, default 1000), BENCH_ITERS (200), BENCH_ROUNDS (7)
+```
+
+`bench_save.gd`: one `GameState` (scalar header + inventory of N `{name, count}`
+rows), best-of-7 rounds (min wins), pure measurement — writes nothing.
+
+## Results (Godot 4.8.dev custom build)
+
+Encoders, N = 1000 items:
+
+| encoder | encode ms/it | decode ms/it | bytes | vs store_var |
+|---|---|---|---|---|
+| **store_var** (binary Variant) | **0.230** | **0.299** | 60160 | 1.00× |
+| json (lossy) | 0.653 | 0.500 | 30876 | 0.51× |
+
+Compression on the 60160-byte store_var blob:
+
+| mode | ratio | out bytes | compress ms/it | decompress ms/it |
+|---|---|---|---|---|
+| fastlz | 14.4% | 8647 | 0.028 | 0.008 |
+| deflate | 8.3% | 4999 | 0.246 | 0.035 |
+| **zstd** | **3.9%** | **2375** | 0.034 | 0.013 |
+| gzip | 8.3% | 5011 | 0.245 | 0.038 |
+
+Ordering holds at N = 50 (store_var+zstd 328 B vs next-smallest candidate 704 B);
+gap narrows with less redundancy, does not invert.
+
+## Conclusions
+
+- **Encoder: binary `store_var`.** Native C++, ~3× faster encode than JSON, and
+  full type fidelity (`Vector2i`/`Packed*` survive; JSON collapses ints→floats).
+  Its safe form (`bytes_to_var`, `allow_objects = false`) is also the default
+  form — the unsafe Object-decoding path is a separate function (RCE,
+  CVE-2019-10069). Correctness + security + speed all point the same way.
+- **The "compact wire format is smallest" wisdom is wrong on disk.** store_var is
+  the *largest raw* blob (60 KB vs JSON 31 KB — Variant type-tags + repeated dict
+  keys), but those are maximally compressible: zstd takes the 60 KB to **2.4 KB**,
+  smaller than raw JSON would be, for ~0.03 ms on top of the fastest encode. The
+  only size that reaches disk is the post-compression one, and binary+zstd wins it.
+- **Compression: zstd.** Beats deflate/gzip on **both** ratio (3.9% vs 8.3%) and
+  speed (~7× faster compress — Godot's deflate is slow). gzip is deflate + a
+  header, never preferred. fastlz: fastest, ~4× worse ratio — per-frame streaming
+  autosave only, never a player-triggered save.
+- **Two gotchas baked into the rule:** `decompress()` needs the original size
+  (zstd frame omits it → store an 8-byte length header; `decompress_dynamic`
+  rejects zstd/fastlz), and Godot hardcodes zstd level 3 (#77820 — raise it via
+  ProjectSettings for fat saves; compression time is noise at save-file sizes).
+
+These are CORRECT/PERF *knowledge*, not lint flags — recorded here so the
+persistence doc's numbers are reproducible, per the bible's measure-everything rule.

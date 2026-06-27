@@ -10,6 +10,7 @@
 | [`style.md`](style.md) | Boot/init validation (incl. editor-gated validators), `StringName`/`NodePath` literal matching, `.is_empty()`, typed containers, duck-dispatch ban, `@export` rules, scene inheritance, authoring-equivalence test. |
 | [`dod.md`](dod.md) | Data shape: POD records, existence-based processing, ID refs, hot/cold split, transforms, condition tables (incl. convention-derived dispatch + value-only `match`→`if/elif`), batched ticks, dispatch costs, inline perf checklist, enum-at-API-boundary, mirror-registry anti-pattern. |
 | [`resource-loading.md`](resource-loading.md) | `preload` vs `load` vs threaded loading, cache modes + lifetime, UID files, "don't roll your own cache", `.tres ↔ .tscn` cycle avoidance. |
+| [`persistence.md`](persistence.md) | Saving/loading runtime state — serialization choice + **Object-deserialization RCE gate**, compression (zstd, measured), atomic write, save migration / version byte. The *write path*; record *shape* lives in `dod.md` (D1/D3/D4/D6). |
 
 Some flag IDs (e.g. C13, H7, M4, S2, P6) are referenced inline in condensed form — the one-line summary at the point of reference is the rule.
 

@@ -22,6 +22,7 @@ flag conditions; this is the *why* — full symptoms, repros, fixes, and data.
 | [05 — Architecture](05-architecture.md) | project skeleton, autoloads, naming, subsystem shapes | drafted |
 | [06 — Resource loading](06-resource-loading.md) | preload/load/threaded, cache modes, UID files | drafted |
 | [07 — Architecture types](07-arch-types.md) | scene-tree composition vs DOD vs ECS, comp-vs-inheritance, the escalation ladder — when/why each, sourced | drafted |
+| [**08 — Persistence**](08-persistence.md) | **save/load — Object-deserialization RCE, compression measured (binary+zstd beats compact wire formats), atomic write, migration** | **drafted** |
 
 Part IV opens with **"The case for DOD (even in GDScript)"** — a position piece (argues one side, not neutral) on why DOD is the default even where the interpreter mutes the cache win: correctness-by-construction, structural speed that survives Variant boxing, alignment with Godot's own server substrate, and the escalation ladder that lands on DOD anyway.
 
