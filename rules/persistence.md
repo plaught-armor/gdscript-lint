@@ -134,5 +134,5 @@ back to.
 
 - [Godot — `FileAccess`](https://docs.godotengine.org/en/stable/classes/class_fileaccess.html) (`store_var`/`get_var`, `open_compressed`, `CompressionMode`)
 - [Godot — `PackedByteArray.compress` / `decompress` / `decompress_dynamic`](https://docs.godotengine.org/en/stable/classes/class_packedbytearray.html)
-- [CVE-2019-10069](https://nvd.nist.gov/vuln/detail/CVE-2019-10069) — Object-deserialization RCE (fix PR [#27398](https://github.com/godotengine/godot/pull/27398)) · [#80562](https://github.com/godotengine/godot/issues/80562) `str_to_var`/`ConfigFile` ungated
+- [CVE-2019-10069](https://nvd.nist.gov/vuln/detail/CVE-2019-10069) — Object-deserialize RCE; the CVE number indexes the multiplayer-path instance ([#27398](https://github.com/godotengine/godot/pull/27398)). The **save-path** serializer gate — `bytes_to_var`/`get_var`/`store_var` default-reject Objects — is [#27485](https://github.com/godotengine/godot/pull/27485), Godot 3.2 (cherry-picked 3.1.1), carried into 4.x. · [#80562](https://github.com/godotengine/godot/issues/80562) `str_to_var`/`ConfigFile` still ungated
 - [#77820](https://github.com/godotengine/godot/issues/77820) zstd/gzip ratio vs cmd tools (level 3) · [#98361](https://github.com/godotengine/godot/pull/98361) `fsync`

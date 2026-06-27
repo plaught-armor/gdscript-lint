@@ -124,6 +124,34 @@ Nodes entirely: `MultiMeshInstance` + a `PackedVector2Array` of transforms, or a
 server-side bullet system, beats a Node pool at scale
 ([qurobullet](https://github.com/quinnvoker/qurobullet)).
 
+### When pooling hurts
+
+A pool is not free — it trades allocation churn for four standing costs. Pay them
+only when the profiler says the churn was worse:
+
+| Cost | What it buys you | Where it bites |
+|---|---|---|
+| **Fixed `CAP` ceiling** | O(1) slots, no growth | over the cap you must drop, replace, or grow — a policy you now own (below) |
+| **Memory pinned forever** | no alloc/free at runtime | the bank holds `CAP` slots' worth of memory for its whole life, even idle — sized for *peak*, paid at *rest* |
+| **Live-slot bookkeeping** | O(1) acquire/release | the free-list + active-list invariant (`_free + _active == CAP`) is hand-maintained — a missed push/pop leaks or double-frees a slot |
+| **Reset discipline** | reuse instead of re-construct | a reused object carries its **last user's state** unless every mutable field is cleared on spawn — the dominant Node-pool bug (see "Pooling Nodes" below) |
+
+So the anti-cases, sharpened:
+
+- **Low frequency** (< ~10×/sec, P21) → the churn was never measurable; a pool adds
+  bookkeeping + a memory floor for nothing. Don't pool 5 enemies spawned once.
+- **Long-lived objects** → they don't churn; you'd just be pinning memory and
+  hand-rolling lifetime the refcounter already does for free.
+- **Highly variable peak** → sizing `CAP` for a rare spike wastes the floor the
+  rest of the time; sizing for the common case drops requests at the spike. If you
+  can't bound the peak, a pool is the wrong shape — reach for MultiMesh / a server.
+- **Heterogeneous objects** → one pool per kind, or the slots can't be uniform;
+  past a few kinds the per-pool overhead outweighs the alloc you saved.
+
+The reset cost is the sneaky one: it converts an *allocation* cost you could see in
+a profiler into a *correctness* cost (stale-state bugs) you can't. That trade only
+pays when the allocation was genuinely the bottleneck.
+
 ### Exhaustion policy (Nystrom's four)
 
 This example returns `-1` (silent drop). That's one of four

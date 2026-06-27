@@ -67,9 +67,18 @@ save file is attacker-controlled the moment it sits on a disk the player can
 reach — local tamper, a cloud-sync swap, a "save editor" off a forum. If your
 load path can construct an **Object** from those bytes, it constructs a *forged*
 object and **runs its embedded script** — full remote code execution
-([CVE-2019-10069](https://nvd.nist.gov/vuln/detail/CVE-2019-10069), CVSS 9.8,
-fixed for the multiplayer API in [#27398](https://github.com/godotengine/godot/pull/27398)
-but the serializer gate is yours to set).
+([CVE-2019-10069](https://nvd.nist.gov/vuln/detail/CVE-2019-10069), CVSS 9.8).
+That CVE number indexes a narrower bug than it sounds — the engine's *own*
+object-decode gate failing on the multiplayer path (Godot ≤3.1, fixed in 3.2 by
+[#27398](https://github.com/godotengine/godot/pull/27398)) — but it is the
+clearest proof the danger is real: the same hole bit the engine itself. The fix
+that protects *saves* is a different PR. [#27485](https://github.com/godotengine/godot/pull/27485)
+added the `allow_objects` gate to the serializer calls you make here —
+`bytes_to_var`, `get_var`, `store_var` — and flipped them to **reject Objects by
+default** ("object variant... should never be the default"). That landed in Godot
+3.2, was cherry-picked to 3.1.1, and is carried into every 4.x. So on 4.x the gate
+is correct out of the box; the only road back to RCE is to *opt in* on untrusted
+bytes — the RCE column below — a choice you make, never a default you inherit.
 
 | API | Safe form | RCE form |
 |---|---|---|
