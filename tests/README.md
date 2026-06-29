@@ -35,7 +35,8 @@ Each finding carries a category — **CORRECT** (bug), **PERF** (speed), **STYLE
 | H2   | `h2.gd`       | untyped `for x in` flagged; `for x: T in` not |
 | C1   | `c1.gd`       | `const Packed*Array` flagged; `var` packed / `const int` not |
 | S6   | `s6.gd`       | `Array[int/Vector2/String]` flagged; `Array[Vector2i/StringName/bool]` (no packed variant) not |
-| S6b  | `s6.gd`       | typed `: Packed*Array = Packed*Array()` / `([...])` flagged; bare literal, var-conversion, arg-position not |
+| S6b  | `s6.gd`       | **plain** field typed `: Packed*Array = Packed*Array()` / `([...])` flagged (STYLE/redundant); bare literal, var-conversion, arg-position, `@export` (→ S6c) not |
+| S6c  | CORRECT | `s6.gd` | `@export` field `: Packed*Array = Packed*Array()` / `([...])` flagged (data loss, #106965); plain-field ctor stays S6b; bare-literal `@export` not |
 | D7b  | `d7b.gd`      | value-only `match` flagged; binding/destructure `match` not |
 | L1   | `loops.gd`    | `range(coll.size())` flagged; 2-arg `range(0, n)` not — **advisory** |
 | L2   | `loops.gd`    | manual descending `while` counter flagged; value-drain / condition `while` / descending `range` not — **advisory** |

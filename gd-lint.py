@@ -18,6 +18,7 @@ Rules (cite the corpus):
   D7b  value-only 'match' — use if/elif (~5x dispatch overhead) (dod.md)
   S6   Array[primitive]    — prefer Packed*Array (style.md)
   S6b  Packed*([...]) ctor  — bare literal, annotation converts (style.md / C1)
+  S6c  @export Packed* ctor — DATA LOSS, bare literal not Array[int] (#106965)
   S15  .is_empty()        — not '== ""' / '.size() == 0' (style.md)
   P12a StringName literal  — '&"x"' not '"x"' for StringName-param methods (style.md)
   L1   range(x.size())     — iterate directly unless you need the index (advisory)
@@ -362,8 +363,22 @@ def rule_s6(raw: str, m: str) -> str | None:
 
 
 def rule_s6b(raw: str, m: str) -> str | None:
+    # @export packed-ctor is the serious case (data loss, #106965) — S6c owns it.
+    # Here we cover only plain fields/locals, where the wrapper is just redundant.
+    if "@export" in raw:
+        return None
     if _RE_PACKED_CTOR.search(m):
         return "S6b: drop the Packed*Array() / Packed*Array([...]) constructor — assign a bare literal ([] or [1, 2, 3]); the typed annotation converts"
+    return None
+
+
+def rule_s6c(raw: str, m: str) -> str | None:
+    # On an @export field the Packed*Array constructor-from-literal form is a
+    # correctness/data-loss trap, not a style nit: it reads back null in the
+    # inspector and persists empty on save/reimport (#106965). Same fix as S6b
+    # (bare literal) — NOT a downgrade to Array[int], which forfeits the S6 win.
+    if "@export" in raw and _RE_PACKED_CTOR.search(m):
+        return "S6c: @export Packed*Array constructor-from-literal loses data (null in inspector, persists empty on reimport — #106965) — assign a bare literal ([] or [1, 2, 3]); do NOT downgrade to Array[int]"
     return None
 
 
@@ -438,6 +453,7 @@ LINE_RULES: dict[str, object] = {
     "C11": rule_c11,
     "S6": rule_s6,
     "S6b": rule_s6b,
+    "S6c": rule_s6c,
     "S15": rule_s15,
     "P12a": rule_p12a,
     "P22": rule_p22,
@@ -458,6 +474,7 @@ ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14", "H13", "S11", "P19"}
 CATEGORY: dict[str, str] = {
     "C1": "CORRECT", "C3": "CORRECT", "C9": "CORRECT", "C14": "CORRECT",
     "C11": "CORRECT", "M1": "CORRECT", "H4": "CORRECT", "H13": "CORRECT",
+    "S6c": "CORRECT",
     "H1": "PERF", "H2": "PERF", "S6": "PERF", "D7b": "PERF", "P12a": "PERF",
     "L1": "PERF", "L2": "PERF", "P22": "PERF", "P6": "PERF", "H14": "PERF",
     "S11": "PERF", "P19": "PERF",
