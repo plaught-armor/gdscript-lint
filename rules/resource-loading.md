@@ -1,39 +1,39 @@
 # GDScript — Resource Loading
 
-How `.tres` / `.tscn` / `Resource` load, cache, and free in Godot 4. When to reach for `preload` vs `load` vs `load_threaded_request`. Cache hygiene rules learned the hard way.
+How `.tres` / `.tscn` / `Resource` load, cache, free in Godot 4. When `preload` vs `load` vs `load_threaded_request`. Cache hygiene rules learned hard way.
 
 ## Rule of thumb
 
 > **Preload constants. Load variables. Thread-load levels.**
 
-- **`preload(...)`** — small, frequently-used, statically known. UI icons, particle materials, item defs, weapon defs, condition tables. Cost is paid once at script-load time. **Cascades through `class_name`** — preloads chain recursively, so heavy nested resources behind preload can freeze boot for seconds.
-- **`load(...)`** — large, conditional, rarely touched, or anything you don't want pulled into boot. Pickup scenes for items the player might never drop, story content. Spreads cost across gameplay. Default `cache_mode = CACHE_MODE_REUSE`; first call reads disk, all subsequent calls return the cached ref.
-- **`ResourceLoader.load_threaded_request(...)`** — anything whose disk + parse cost crosses a frame budget. Rooms, cutscenes, large bestiaries. Pair with `load_threaded_get_status(path)` (poll across frames) → `load_threaded_get(path)` (retrieve).
+- **`preload(...)`** — small, frequent, statically known. UI icons, particle materials, item defs, weapon defs, condition tables. Cost paid once at script-load. **Cascades through `class_name`** — preloads chain recursively → heavy nested resources behind preload can freeze boot seconds.
+- **`load(...)`** — large, conditional, rarely touched, or anything you don't want in boot. Pickup scenes for items player might never drop, story content. Spreads cost across gameplay. Default `cache_mode = CACHE_MODE_REUSE`; first call reads disk, rest return cached ref.
+- **`ResourceLoader.load_threaded_request(...)`** — anything whose disk + parse cost crosses frame budget. Rooms, cutscenes, large bestiaries. Pair with `load_threaded_get_status(path)` (poll across frames) → `load_threaded_get(path)` (retrieve).
 
 ## Cache semantics
 
-ResourceLoader's cache is **strong-refcount**. There's no separate "weak cache." A loaded resource stays in memory as long as any code holds a ref (the cache itself counts as one); it frees the moment the last ref drops. `static var ALL: Array[ItemDef] = [preload(...), ...]` pins everything in that array for the autoload's lifetime — i.e. forever in practice.
+ResourceLoader cache = **strong-refcount**. No separate "weak cache." Loaded resource stays in memory while any code holds ref (cache itself counts); frees moment last ref drops. `static var ALL: Array[ItemDef] = [preload(...), ...]` pins everything in array for autoload's lifetime — forever in practice.
 
 ### Cache modes
 
 | Mode | Behavior |
 |---|---|
 | `CACHE_MODE_REUSE` (default) | Root + sub-resources pulled from cache if present. Misses load + populate. |
-| `CACHE_MODE_IGNORE` | Root + direct subs bypass the cache. Dependencies still REUSE. |
+| `CACHE_MODE_IGNORE` | Root + direct subs bypass cache. Dependencies still REUSE. |
 | `CACHE_MODE_REPLACE` | Cached entries refreshed in place — existing refs see new data. Hot-reload flows. |
 | `CACHE_MODE_IGNORE_DEEP` / `CACHE_MODE_REPLACE_DEEP` | Recursive variants. |
 
-Don't pass an explicit cache_mode unless you have a specific reason — `REUSE` is right almost always. Bugs [#82830](https://github.com/godotengine/godot/issues/82830) (PackedScene cache inconsistency) and [#90344](https://github.com/godotengine/godot/issues/90344) hit some 4.x versions when explicit modes are passed; re-test if you tweak.
+⊥ pass explicit cache_mode without specific reason — `REUSE` right almost always. Bugs [#82830](https://github.com/godotengine/godot/issues/82830) (PackedScene cache inconsistency) & [#90344](https://github.com/godotengine/godot/issues/90344) hit some 4.x versions when explicit modes passed; re-test if you tweak.
 
 ## Don't roll your own cache
 
-ResourceLoader already deduplicates by path. A `static var SCENES: Dictionary[int, PackedScene]` populated at boot from `load(path)` is **redundant** — every entry is also in the ResourceLoader cache, and `load()` with `CACHE_MODE_REUSE` is the cheapest path back to that cache. The dedicated Dict adds bookkeeping with zero behavior delta.
+ResourceLoader already dedupes by path. `static var SCENES: Dictionary[int, PackedScene]` populated at boot from `load(path)` = **redundant** — every entry also in ResourceLoader cache, & `load()` with `CACHE_MODE_REUSE` = cheapest path back to it. Dedicated Dict adds bookkeeping, zero behavior delta.
 
-Symptom: a registry autoload with both an `ALL: Array[ItemDef]` (the data table) and a `SCENES: Dictionary[int, PackedScene]` (the parallel "cache"). Fold or delete the second one.
+Symptom: registry autoload with both `ALL: Array[ItemDef]` (data table) & `SCENES: Dictionary[int, PackedScene]` (parallel "cache"). Fold or delete second.
 
 ## Don't `ResourceLoader.exists()` after boot validate
 
-Boot validate already errors on missing paths. After boot, the only way `load()` can return null is asset deletion mid-runtime — at which point a redundant `exists()` guard gives the caller the same null they'd get from `load()` directly, just one hash lookup cheaper. Trust the boot pass:
+Boot validate already errors on missing paths. After boot, only way `load()` returns null = asset deleted mid-runtime — at which point redundant `exists()` guard gives caller same null they'd get from `load()` directly, one hash lookup cheaper. Trust boot pass:
 
 ```gdscript
 # Bad — exists() is dead weight after _validate ran at autoload boot.
@@ -46,35 +46,35 @@ func get_pickup_scene(id: Id) -> PackedScene:
     return load(path) as PackedScene
 ```
 
-`exists()` still earns its keep **inside** boot validate (catches missing files at boot rather than first use) — drop it only on the runtime-lookup hot path.
+`exists()` still earns keep **inside** boot validate (catches missing files at boot not first use) — drop only on runtime-lookup hot path.
 
 ## Editor-gate expensive validators
 
-When boot validate instantiates scenes / walks resources (mesh decode, texture upload, sub-scene chains), wrap the expensive layer in `if OS.has_feature("editor"):`. Release trusts what the editor signed off. Full pattern + example: [`style.md`](style.md) M10a.
+When boot validate instantiates scenes / walks resources (mesh decode, texture upload, sub-scene chains), wrap expensive layer in `if OS.has_feature("editor"):`. Release trusts what editor signed off. Full pattern + example: [`style.md`](style.md) M10a.
 
 ## No bidirectional `.tres ↔ .tscn` ext_resource
 
 Engine bug C17 ([#98551](https://github.com/godotengine/godot/issues/98551)) — preload cycles can hang or load partial Resources. Cycles most often form as `.tres → .tscn → .tres`:
 
-- `.tscn` ext_resources its data `.tres` (normal — pickup scene references the ItemDef).
-- `.tres` adds an `@export var pickup_scene: PackedScene` pointing back at the `.tscn`.
+- `.tscn` ext_resources its data `.tres` (normal — pickup scene references ItemDef).
+- `.tres` adds `@export var pickup_scene: PackedScene` pointing back at `.tscn`.
 - Engine resolves `.tres → .tscn → .tres → ...`.
 
-Fix: carry the inverse direction as a **String path** (or, better, derive it by **convention** from a stable key — see [`dod.md`](dod.md) D7a convention-derived dispatch). `.tres` stays a leaf in the dependency graph; `.tscn` keeps its forward ref. See [`engine-bugs.md`](engine-bugs.md) C17 for the bug itself.
+Fix: carry inverse direction as **String path** (or better, derive by **convention** from stable key — see [`dod.md`](dod.md) D7a convention-derived dispatch). `.tres` stays leaf in dependency graph; `.tscn` keeps forward ref. See [`engine-bugs.md`](engine-bugs.md) C17 for bug itself.
 
 ## UID files (`.uid` sidecars)
 
-- Every imported resource has a UID; `.tscn` / `.tres` store it in the header. Godot 4.4+ adds `.uid` sidecar files so scripts and shaders participate too.
-- `[ext_resource type="..." uid="uid://..." path="res://..." id="..."]` — UID is the resolution key, path is the editor-display fallback.
-- **Commit `.uid` files to git**. Without them, cloning the project breaks every ext_resource reference on the new host.
-- Renaming/moving a file with its `.uid` keeps references valid. Renaming without `.uid` silently breaks them.
+- Every imported resource has UID; `.tscn` / `.tres` store it in header. Godot 4.4+ adds `.uid` sidecar files so scripts & shaders participate too.
+- `[ext_resource type="..." uid="uid://..." path="res://..." id="..."]` — UID = resolution key, path = editor-display fallback.
+- **Commit `.uid` files to git**. Without them, cloning project breaks every ext_resource reference on new host.
+- Renaming/moving file with its `.uid` keeps references valid. Renaming without `.uid` silently breaks them.
 
 ## Misc
 
-- `Resource.duplicate()` makes a shallow copy. Use when you need a per-instance mutable variant of a shared design-time Resource (e.g. per-door reinforcement HP state).
-- `make_read_only()` on `Array` / `Dictionary` after boot validate locks the structure against accidental mutation. Pairs with `static var` — see [`engine-bugs.md`](engine-bugs.md) C2a.
-- `ResourceLoader.has_cached(path)` is a free check — use it when you want to *decide* between sync `load()` and threaded prewarm, not when you already know you'll call `load()` regardless.
-- Don't `await ResourceLoader.load_threaded_request(...)` — it's not a coroutine. Poll status instead. [`type-async.md`](type-async.md) covers signal/await traps.
+- `Resource.duplicate()` makes shallow copy. Use when you need per-instance mutable variant of shared design-time Resource (e.g. per-door reinforcement HP state).
+- `make_read_only()` on `Array` / `Dictionary` after boot validate locks structure against accidental mutation. Pairs with `static var` — see [`engine-bugs.md`](engine-bugs.md) C2a.
+- `ResourceLoader.has_cached(path)` = free check — use when you want to *decide* between sync `load()` & threaded prewarm, not when you already know you'll call `load()` regardless.
+- ⊥ `await ResourceLoader.load_threaded_request(...)` — not coroutine. Poll status instead. [`type-async.md`](type-async.md) covers signal/await traps.
 
 ## Sources
 

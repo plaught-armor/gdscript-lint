@@ -2,9 +2,9 @@
 
 Default paradigm. Code transforms data; doesn't *model* things. Reject three lies (Acton):
 
-1. **Code more important than data** — wrong. Data shape determines what's possible + how fast.
-2. **Code models the world** — wrong. Don't write `Rocket` for one rocket; model `(N rockets, dt) → new positions`.
-3. **Software is a platform** — wrong. Cache lines, Variant dispatch, bytecode are real. Big-O ignores dominating constants.
+1. **Code more important than data** — wrong. Data shape determines what's possible + speed.
+2. **Code models the world** — wrong. ⊥ write `Rocket` for one rocket; model `(N rockets, dt) → new positions`.
+3. **Software is a platform** — wrong. Cache lines, Variant dispatch, bytecode real. Big-O ignores dominating constants.
 
 Apply: separate **data** (POD) from **behavior** (pure transforms on collections). Encode state by **container membership**, not flags. Reference by **integer ID**, not pointer. Split data **by access pattern**, not domain object. Cheapest dispatch that fits.
 
@@ -12,12 +12,12 @@ Apply: separate **data** (POD) from **behavior** (pure transforms on collections
 
 - `extends Resource` for saveable / editor-authored (settings, stat blocks, weapon defs, save slots).
 - `extends RefCounted` for transient in-memory (events, hit results, queries, scratch records).
-- Behavior moves OUT to `static func` on a systems class (`CombatSystem.classify_hit(...)`) or to the Node owning runtime state. `_init(...)` is the constructor when field set is fixed. **Don't** add `static make(...)` alongside `_init` — redundant indirection.
+- Behavior moves OUT to `static func` on systems class (`CombatSystem.classify_hit(...)`) or to Node owning runtime state. `_init(...)` = constructor when field set fixed. **Don't** add `static make(...)` alongside `_init` — redundant indirection.
 - **Why:** trivially serializable, diffable, mod-overridable, unit-testable (no SceneTree). Mixed data+behavior drags SceneTree into tests + tangles save format with impl.
 
 ## D2 — Existence-based processing (set membership over flags)
 
-Optional/conditional state = entity's presence in a container, not a field on every entity.
+Optional/conditional state = entity's presence in container, not field on every entity.
 
 | Bad | Good |
 |---|---|
@@ -50,7 +50,7 @@ Stay bool when: binary user toggle (`_flashlight_on`), per-frame derived cache, 
 
 ## D2a — Groups are HashMap-backed; don't hand-roll a set "for perf"
 
-Myth: groups = flat array scanned with `find`. False. `SceneTree` holds `HashMap<StringName, Group>`; each Node holds its own `HashSet<StringName>`. Cost ([forum](https://forum.godotengine.org/t/question-about-group-does-it-iterate-over-the-whole-tree/116906)):
+Myth: groups = flat array scanned with `find`. False. `SceneTree` holds `HashMap<StringName, Group>`; each Node holds own `HashSet<StringName>`. Cost ([forum](https://forum.godotengine.org/t/question-about-group-does-it-iterate-over-the-whole-tree/116906)):
 
 | Call | Backing | Cost |
 |---|---|---|
@@ -59,15 +59,15 @@ Myth: groups = flat array scanned with `find`. False. `SceneTree` holds `HashMap
 | `get_first_node_in_group(&"x")` | HashMap lookup | O(1), no alloc |
 | `get_nodes_in_group(&"x")` | HashMap lookup + **fresh `Array` copy** | O(k) + per-call alloc |
 
-Only footgun: `get_nodes_in_group` in a hot loop ([proposal #7080](https://github.com/godotengine/godot-proposals/issues/7080)). For per-frame use, cache + refresh on entry/exit edges (signals: `tree.node_added_to_group`, `node_removed_from_group`), or batch behind a manager owning its own `Array[T]`. Everything else: groups are simplest correct shape, don't replace with Dict-of-IDs "for perf."
+Only footgun: `get_nodes_in_group` in hot loop ([proposal #7080](https://github.com/godotengine/godot-proposals/issues/7080)). Per-frame use: cache + refresh on entry/exit edges (signals: `tree.node_added_to_group`, `node_removed_from_group`), or batch behind manager owning own `Array[T]`. Else: groups simplest correct shape, ⊥ replace with Dict-of-IDs "for perf."
 
-Better than `is_in_group` when applicable: `is_in_group(&"player")` → `is Player`. Same O(1), compile-time-checked, no `StringName` hash, no typo, no tag-the-node requirement. Per-member metadata → `Dictionary[int, RecordType]` keyed by `get_instance_id()`. Groups answer "is it in the set"; dicts answer "what data does it have."
+Better than `is_in_group` when applicable: `is_in_group(&"player")` → `is Player`. Same O(1), compile-time-checked, no `StringName` hash, no typo, no tag-the-node requirement. Per-member metadata → `Dictionary[int, RecordType]` keyed by `get_instance_id()`. Groups answer "is it in set"; dicts answer "what data does it have."
 
-Trap: hand-rolled `static var alive: Array[Enemy]` skips the engine's hashset, re-implements with worse ergonomics (every spawner pushes, every `_exit_tree` pulls, forgetting one is silent). Reach for a group when membership is genuinely tree-wide; keep it local otherwise — D2b.
+Trap: hand-rolled `static var alive: Array[Enemy]` skips engine's hashset, re-implements with worse ergonomics (every spawner pushes, every `_exit_tree` pulls, forgetting one silent). Reach for group when membership genuinely tree-wide; keep local otherwise — D2b.
 
 ## D2b — Groups are a global namespace; ration like autoloads
 
-A group is registered on the **whole `SceneTree`** (one process-global `HashMap<StringName, Group>`), not a node or subtree. `get_nodes_in_group(&"x")` sweeps the entire tree, unspecified order, fresh alloc — no subtree scope, no memory locality. So a group name is a **global identifier with autoload-grade hazards**: two unrelated systems both grabbing `&"active"` silently share one set; scope must be hand-encoded into the string (`&"room3_enemies"`) = a namespace managed by convention. Membership-not-flag (D2) is unchanged; the open question is *which container*, at *what scope*.
+Group registered on **whole `SceneTree`** (one process-global `HashMap<StringName, Group>`), not node or subtree. `get_nodes_in_group(&"x")` sweeps entire tree, unspecified order, fresh alloc — no subtree scope, no memory locality. So group name = **global identifier with autoload-grade hazards**: two unrelated systems both grabbing `&"active"` silently share one set; scope must be hand-encoded into string (`&"room3_enemies"`) = namespace managed by convention. Membership-not-flag (D2) unchanged; open question = *which container*, at *what scope*.
 
 | Membership is… | Container | Why |
 |---|---|---|
@@ -75,9 +75,9 @@ A group is registered on the **whole `SceneTree`** (one process-global `HashMap<
 | owned by one manager/room seeing every add+remove | that owner's typed `Array[T]` | locality, typed, save-friendly, no global name |
 | per-entity data on a subset | `Dictionary[int, T]` keyed by id | answers "what data", not just "in set" |
 
-- **Group ⇔ autoload analogy (D9):** global reach + variable membership + decoupled consumers. `&"interactable"` (raycast hits any tagged), `&"save_participants"` (save sweeps tree), HUD reading `&"boss"` without owning it. That's what the global registry is for.
-- **Single owner sees every transition → no group.** A manager that spawns+kills its enemies already *is* the source of truth; its `Array[Enemy]` (refreshed inline, not via group signals) has the locality a tree-scattered group set can't. This is the D4/D8 shape. The group there is a global registry the owner doesn't need.
-- **Smell:** scope baked into a group name (`&"room3_enemies"`, `&"team_a_alive"`) → the set isn't tree-wide; it belongs to whoever owns that scope. A group queried by exactly one system that already holds the members → drop the group, hold the array.
+- **Group ⇔ autoload analogy (D9):** global reach + variable membership + decoupled consumers. `&"interactable"` (raycast hits any tagged), `&"save_participants"` (save sweeps tree), HUD reading `&"boss"` without owning. That's what global registry for.
+- **Single owner sees every transition → no group.** Manager that spawns+kills its enemies already *is* source of truth; its `Array[Enemy]` (refreshed inline, not via group signals) has locality tree-scattered group set can't. This = D4/D8 shape. Group there = global registry owner doesn't need.
+- **Smell:** scope baked into group name (`&"room3_enemies"`, `&"team_a_alive"`) → set isn't tree-wide; belongs to whoever owns that scope. Group queried by exactly one system already holding members → drop group, hold array.
 
 ```gdscript
 # Bad — tree-global group for membership one owner already sees. "Alive in THIS
@@ -99,9 +99,9 @@ Worked example (runnable, verified 4.8.dev): `tests/example_dod_membership_proj/
 
 ## D3 — Reference by integer ID, not object pointer
 
-When a ref crosses systems / gets serialized / sits in a signal payload / outlives the holder's subtree → store `get_instance_id()` (or your own assigned ID); resolve via `instance_from_id()` + `is`/validity check at use site.
+When ref crosses systems / serialized / sits in signal payload / outlives holder's subtree → store `get_instance_id()` (or own assigned ID); resolve via `instance_from_id()` + `is`/validity check at use site.
 
-Why: (1) sidesteps freed-ID-reuse bug ([#32383](https://github.com/godotengine/godot/issues/32383)) — ID lookup returns live object or `null`, never wrong-type live; (2) breaks RefCounted cycles ([#7038](https://github.com/godotengine/godot/issues/7038)); (3) save-friendly; (4) `Dictionary[int, T]` keyed by ID is natural existence-based shape; (5) external indexing without invasive bookkeeping.
+Why: (1) sidesteps freed-ID-reuse bug ([#32383](https://github.com/godotengine/godot/issues/32383)) — ID lookup returns live object or `null`, never wrong-type live; (2) breaks RefCounted cycles ([#7038](https://github.com/godotengine/godot/issues/7038)); (3) save-friendly; (4) `Dictionary[int, T]` keyed by ID = natural existence-based shape; (5) external indexing without invasive bookkeeping.
 
 ```gdscript
 # Bad — live ref; freed-source bug, cycle, won't serialize.
@@ -121,12 +121,12 @@ Sibling refs inside one scene tree → typed push-injection (see [style.md](styl
 
 ## D4 — Split data by access pattern, not domain object
 
-Monolithic Enemy with 30 fields touched by 5 systems is wrong. Decompose into per-concern containers:
+Monolithic Enemy with 30 fields touched by 5 systems wrong. Decompose into per-concern containers:
 
 - positions (`PackedVector3Array` on manager), AI state (typed `RefCounted` records keyed by ID), inventory (Dict keyed by item), perception (`&"alerted"` group).
 - Save: `SaveSlot` = relational object — `position_data`, `inventory_data`, `quest_state`, `room_state` separate, not one blob.
-- Don't denormalize ("cache enemy's room on enemy"). Room owns occupants; enemy looks up when needed.
-- Don't mirror world-noun hierarchy onto class hierarchy. No `Rocket` class — `Rocket` is one row. There may be `RocketDef` (Resource, shared) + `RocketPool` (Node, owns Array of active).
+- ⊥ denormalize ("cache enemy's room on enemy"). Room owns occupants; enemy looks up when needed.
+- ⊥ mirror world-noun hierarchy onto class hierarchy. No `Rocket` class — `Rocket` = one row. May be `RocketDef` (Resource, shared) + `RocketPool` (Node, owns Array of active).
 
 ## D5 — Hot/cold data split
 
@@ -139,19 +139,19 @@ Per-frame fields shouldn't co-locate with load-time / once-per-event fields.
 
 ## D5a — Hot-record field budget
 
-D5 says split hot from cold. D5a is the **number** that says when, plus the
-field-*type* rule. Scope: a `RefCounted` on a **hot alloc path** — constructed
+D5 says split hot from cold. D5a = **number** that says when, plus the
+field-*type* rule. Scope: `RefCounted` on **hot alloc path** — constructed
 repeatedly (per-frame `Event`/`Result`, per-hit record, not-yet-pooled entity).
-One-shot `Def`/config/registry entries are exempt — built once, field count is
+One-shot `Def`/config/registry entries exempt — built once, field count
 free, ignore this rule.
 
 **Measured (4.8.dev, `tests/bench_refcounted_alloc.gd` + `bench_refcounted_vartype.gd`,
 N=1M, best-of-7):**
 
-- **Methods are free.** `.new()` cost flat across 0→200 methods (171→165 ns) —
-  methods live on the shared script, never per-instance. **Never limit method
+- **Methods free.** `.new()` cost flat across 0→200 methods (171→165 ns) —
+  methods live on shared script, never per-instance. **Never limit method
   count for alloc reasons.**
-- **Fields are the whole cost,** ~linear: `cost(V) ≈ 165 + per_field·V` ns.
+- **Fields = whole cost,** ~linear: `cost(V) ≈ 165 + per_field·V` ns.
 - **Field *type* splits two tiers** (per-var-of-type, 20 vars/class):
 
   | tier | types | ns/var |
@@ -159,13 +159,13 @@ N=1M, best-of-7):**
   | inline-in-Variant | int, float, bool, Vector2/3/4, Color, **Transform3D, Basis**, String `""`, StringName, object-ref, null | ~31–46 |
   | heap-backed container | `Array`, `Dictionary`, `Packed*Array`, **typed `Array[int]`** | ~75–114 |
 
-  The line is **inline-vs-heap, not POD-vs-non-POD** — even big math structs
-  (Transform3D/Basis ~46 ns) are cheap; a container field allocates backing
+  Line = **inline-vs-heap, not POD-vs-non-POD** — even big math structs
+  (Transform3D/Basis ~46 ns) cheap; container field allocates backing
   storage per instance even when empty → 2–3×. Counterintuitive: typed
   `Array[int]` (114 ns) costs *more* to construct than untyped `Array` (75) —
   typed wins at access/iter, loses at construction.
 
-**The budget.** A 60fps frame = 16.67M ns. Holding alloc < 5% frame:
+**The budget.** 60fps frame = 16.67M ns. Holding alloc < 5% frame:
 
 | allocs/frame | max inline fields | verdict |
 |---|---|---|
@@ -179,11 +179,11 @@ N=1M, best-of-7):**
 > color / enum-int / object-ref / String / StringName). **Zero heap-container
 > members** (`Array` / `Dictionary` / `Packed*`). Methods unlimited.
 
-A heap-container field on a hot record is both the 2–3× tax *and* a smell: that
-record carries a collection owned by a manager's table (D4) — move it out, store
-an **ID** (D3) into the owning container. Over budget on inline fields, or
+Heap-container field on hot record = both 2–3× tax *and* smell: that
+record carries collection owned by manager's table (D4) — move out, store
+**ID** (D3) into owning container. Over budget on inline fields, or
 allocating >1k/frame → hot/cold split (D5), reference-by-ID (D3), or pool (P21).
-The asymmetry to remember: **fat behavior + thin data is the cheap shape** —
+Asymmetry to remember: **fat behavior + thin data = cheap shape** —
 methods cost nothing at `new()`, fields cost everything.
 
 ## D6 — Transforms over methods
@@ -236,7 +236,7 @@ Designer-tunable → move table to `.tres` Resource (Dict export). Direct `d[k]`
 
 ### D7a — Convention-derived dispatch via explicit helper
 
-Closed enum → file path / string key mapping. Pick an explicit `if/elif` helper over `Id.keys()[i].to_lower()`. Wins: no StringName alloc + lowercasing per call, one-place override for slots whose asset name diverges from the enum spelling, loud default (final `else` catches new slots — pair with boot validate so the missing arm surfaces there, not at first use).
+Closed enum → file path / string key mapping. Pick explicit `if/elif` helper over `Id.keys()[i].to_lower()`. Wins: no StringName alloc + lowercasing per call, one-place override for slots whose asset name diverges from enum spelling, loud default (final `else` catches new slots — pair with boot validate so missing arm surfaces there, not at first use).
 
 ```gdscript
 # Bad — alloc per call; can't override a slot whose .tscn diverges
@@ -252,17 +252,17 @@ static func _scene_basename(id: Id) -> String:
     else: return ""   # inventory-only / unmapped
 ```
 
-String-literal returns are interned, so the dispatch is cheap. Boot validate fires on missing arms via the empty-return path; designer feedback at boot, not first use. Use `if/elif` for the body (D7b) — value-only dispatch on `id`, not pattern matching.
+String-literal returns interned, so dispatch cheap. Boot validate fires on missing arms via empty-return path; designer feedback at boot, not first use. Use `if/elif` for body (D7b) — value-only dispatch on `id`, not pattern matching.
 
 ## D7b — Value-only dispatch → `if/elif`, not `match`
 
-`match` is the wrong construct for value dispatch. Reserve it for **actual pattern matching** (binding, destructuring, type patterns, guards). "Value-only" = branching on the value of one discriminator (type code, tag byte, enum, string key) where each arm is a plain compare. That's most `match` usage in the wild — and it's slower with zero offsetting benefit. **Applies even on cold paths** — the construct choice is unconditional; ROI just larger in hot loops.
+`match` = wrong construct for value dispatch. Reserve for **actual pattern matching** (binding, destructuring, type patterns, guards). "Value-only" = branching on value of one discriminator (type code, tag byte, enum, string key) where each arm = plain compare. That = most `match` usage in wild — slower with zero offsetting benefit. **Applies even on cold paths** — construct choice unconditional; ROI just larger in hot loops.
 
-**Bytecode:** a `match` arm compiles to ~10 VM opcodes (typeof check + value compare + bool materialize + branch) — it carries pattern-matching machinery (destructure, bind, type-test) even when you use none of it. An `if/elif` branch is ~2. Interpreted GDScript pays per opcode → value `match` ≈ 5× the dispatch overhead of the equivalent `if` chain.
+**Bytecode:** `match` arm compiles to ~10 VM opcodes (typeof check + value compare + bool materialize + branch) — carries pattern-matching machinery (destructure, bind, type-test) even when unused. `if/elif` branch = ~2. Interpreted GDScript pays per opcode → value `match` ≈ 5× dispatch overhead of equivalent `if` chain.
 
-> **Footnote ([#120660](https://github.com/godotengine/godot/pull/120660), 4.x):** compound `if` conditions got *cheaper still*. Pre-fix, `if a and b` materialized each operand's result into a temp before branching; the PR branches directly off the short-circuit → ~30-35% faster for a single `and`/`or`, bytecode up to 79% smaller, each extra operator costs 3 addresses not 14. **Does not change the `if/elif` vs `match` verdict** — the arms here are single compares (`if x == A`), unaffected. It only sharpens the model: where an arm *does* carry a compound guard (`if x == A and y > 0`), `if/elif`'s lead over `match` widens, since `match`'s `when` guard sees no such optimization. One more reason value dispatch stays in `if/elif`.
+> **Footnote ([#120660](https://github.com/godotengine/godot/pull/120660), 4.x):** compound `if` conditions got *cheaper still*. Pre-fix, `if a and b` materialized each operand's result into temp before branching; PR branches directly off short-circuit → ~30-35% faster for single `and`/`or`, bytecode up to 79% smaller, each extra operator costs 3 addresses not 14. **Does not change `if/elif` vs `match` verdict** — arms here = single compares (`if x == A`), unaffected. Only sharpens model: where arm *does* carry compound guard (`if x == A and y > 0`), `if/elif`'s lead over `match` widens, since `match`'s `when` guard sees no such optimization. One more reason value dispatch stays in `if/elif`.
 
-**Measured** (`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, median of 5 runs, all surrounding work held identical, vs `Array[Callable]` index baseline = 1.00×; absolute ratios drift ±~20% build-to-build, the ordering is the durable finding):
+**Measured** (`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, median of 5 runs, all surrounding work held identical, vs `Array[Callable]` index baseline = 1.00×; absolute ratios drift ±~20% build-to-build, ordering = durable finding):
 
 | construct | vs Callable jump-table |
 |---|---|
@@ -273,9 +273,9 @@ String-literal returns are interned, so the dispatch is cheap. Boot validate fir
 | `match`, 6 arms, hit last | 0.37× — linearity brutal |
 | `if-elif`, 6 arms, hit last | 0.73× — linearity cheap |
 
-Two takeaways: (1) no real jump table exists in interpreted GDScript — even `Array[Callable]` indexing isn't O(1)-cheap, and `match` is worse than it; (2) `if/elif` lets you inline the arm body (no `Callable.call`, no call frame) — where the real ~2.1× win lives.
+Two takeaways: (1) no real jump table exists in interpreted GDScript — even `Array[Callable]` indexing isn't O(1)-cheap, and `match` worse than it; (2) `if/elif` lets you inline arm body (no `Callable.call`, no call frame) — where real ~2.1× win lives.
 
-**Nuance — hoist a computed subject.** `match x` evaluates `x` once; a naive `if x == A: elif x == B:` re-evaluates per branch. When the subject is computed (`typeof(v)`, `reader.get_method()`, `outcome.value`), assign to a typed local first, then branch on the local:
+**Nuance — hoist computed subject.** `match x` evaluates `x` once; naive `if x == A: elif x == B:` re-evaluates per branch. When subject computed (`typeof(v)`, `reader.get_method()`, `outcome.value`), assign to typed local first, then branch on local:
 
 ```gdscript
 var t: int = typeof(v)   # evaluate once, like match did
@@ -283,26 +283,26 @@ if t == TYPE_INT: ...
 elif t == TYPE_STRING: ...
 ```
 
-Plain param/local subjects need no hoist — compare directly. Don't alias a param to a local "to be safe"; that's a wasted assignment.
+Plain param/local subjects need no hoist — compare directly. Don't alias param to local "to be safe"; wasted assignment.
 
-**When `match` IS still correct:** real pattern matching with no clean `if` equivalent — binding (`var n`), destructuring (`[a, b]`, `{"key": v}`), type patterns, guards (`when`), wildcard-with-binding. There the expressiveness is the point and the perf cost buys something.
+**When `match` IS still correct:** real pattern matching with no clean `if` equivalent — binding (`var n`), destructuring (`[a, b]`, `{"key": v}`), type patterns, guards (`when`), wildcard-with-binding. There expressiveness = point and perf cost buys something.
 
-**Exhaustiveness objection — moot.** GDScript `match` does *not* enforce exhaustiveness (no compile error on a missing arm), so converting a value `match` to `if/elif` loses nothing safety-wise. Keep a final `else`/default that fails loud (or a boot-time validator), exactly as you'd keep `match`'s `_:` arm.
+**Exhaustiveness objection — moot.** GDScript `match` does *not* enforce exhaustiveness (no compile error on missing arm), so converting value `match` to `if/elif` loses nothing safety-wise. Keep final `else`/default that fails loud (or boot-time validator), exactly as you'd keep `match`'s `_:` arm.
 
 ## D8 — Batched homogeneous processing > per-Node tick
 
-**Measured correction (4.8.dev, `bench_process_centralization_proj/`):** a manager looping nodes and calling `e.tick()` per entity is **~2× SLOWER** than per-node `_physics_process` — a GDScript method call (D9 ~4.3× tier) costs more than the engine's native callback, and the loop adds array overhead. Centralizing the *call* is a loss, not a win. The dispatch win exists **only for inline SoA**: a manager owning `Packed*Array`s and working them in a flat loop with **no per-entity calls** (~2.3× faster at light work, tapering to parity as work grows). "One vs a few" managers: no difference.
+**Measured correction (4.8.dev, `bench_process_centralization_proj/`):** manager looping nodes and calling `e.tick()` per entity = **~2× SLOWER** than per-node `_physics_process` — GDScript method call (D9 ~4.3× tier) costs more than engine's native callback, and loop adds array overhead. Centralizing *call* = loss, not win. Dispatch win exists **only for inline SoA**: manager owning `Packed*Array`s and working them in flat loop with **no per-entity calls** (~2.3× faster at light work, tapering to parity as work grows). "One vs a few" managers: no difference.
 
-So a manager-of-Nodes earns its keep by **doing less**, not by cheaper dispatch:
+So manager-of-Nodes earns keep by **doing less**, not cheaper dispatch:
 
-- `EnemyManager` scene-root/autoload owns `Array[Enemy]`, `for e in alive: e.tick(delta)`, per-instance `set_physics_process(false)`. This is **not** a speed-up over self-ticking — its value is the *control* it enables (below).
-- Pairs with D2: iterate the alive set once/frame; dead/distant aren't in the loop at all — skip + LOD (split `_alive_near`/`_alive_far`, tick far every Nth frame). **The work that doesn't happen is the win.** Don't call `get_nodes_in_group(&"alive")` in the loop — alloc per call; cache `Array[T]`, refresh via signals.
-- For the *dispatch* win, go full SoA (flat arrays, no per-entity Node) — see the worked example's `EnemyManager.tick()`.
+- `EnemyManager` scene-root/autoload owns `Array[Enemy]`, `for e in alive: e.tick(delta)`, per-instance `set_physics_process(false)`. **Not** speed-up over self-ticking — value = *control* it enables (below).
+- Pairs with D2: iterate alive set once/frame; dead/distant aren't in loop at all — skip + LOD (split `_alive_near`/`_alive_far`, tick far every Nth frame). **Work that doesn't happen = win.** Don't call `get_nodes_in_group(&"alive")` in loop — alloc per call; cache `Array[T]`, refresh via signals.
+- For *dispatch* win, go full SoA (flat arrays, no per-entity Node) — see worked example's `EnemyManager.tick()`.
 - ROI only at N × per-frame cost large enough. Don't refactor 5 enemies.
 
 ## D9 — Static-on-RefCounted vs autoload Node
 
-Measured Godot 4.8.dev (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, best-of-7, median of 5 runs; see bible Part III §2). Absolute ratios drift ±~20% build-to-build — the durable findings are the **ordering** and **tiers** (instance method edges out the autoload; autoload ≈ 1.1× a cached instance call regardless of the absolute):
+Measured Godot 4.8.dev (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, best-of-7, median of 5 runs; see bible Part III §2). Absolute ratios drift ±~20% build-to-build — durable findings = **ordering** and **tiers** (instance method edges out autoload; autoload ≈ 1.1× a cached instance call regardless of absolute):
 
 | Dispatch | × inline |
 |---|---|
@@ -323,7 +323,7 @@ Measured Godot 4.8.dev (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, b
 - Cache/registry/RNG seed/pub-sub signal → autoload Node (must be Node to own signals).
 - ⊥ resolve autoload via `get_node(^"X")` in hot paths — use global ident (cached at load).
 - Promotion: static-only → drop `static`, add to `[autoload]`. Callsites unchanged (`class_name` already global).
-- **Lambda dispatch**: a bare lambda `.call` sits in the static/instance tier (~3.6×) — fine as a predicate/comparator; capturing a local adds ~10%. ⊥ wrap a named fn in a pass-through lambda (`func(x): return f(x)`) — double-dispatch, ~6.5× vs ~3.8× to pass that same fn as a `Callable` directly (the real alternative), ~1.7× for nothing; pass the reference (`f` / `obj.method`). Flagged **P19** (advisory). Inline-body vs extract-to-named-method is perf-neutral (the dead S1 rule had no perf successor) — choose on readability.
+- **Lambda dispatch**: bare lambda `.call` sits in static/instance tier (~3.6×) — fine as predicate/comparator; capturing local adds ~10%. ⊥ wrap named fn in pass-through lambda (`func(x): return f(x)`) — double-dispatch, ~6.5× vs ~3.8× to pass that same fn as `Callable` directly (real alternative), ~1.7× for nothing; pass reference (`f` / `obj.method`). Flagged **P19** (advisory). Inline-body vs extract-to-named-method perf-neutral (dead S1 rule had no perf successor) — choose on readability.
 
 ## P18 — Signals decouple, don't speed
 
@@ -356,26 +356,26 @@ Trap: preemptive inlining loses reuse, hides intent, almost never moves needle. 
 
 Fixed closed set (states, kinds, slots, categories) → `enum` int. Reserve `StringName` for string-like ops (concat, prefix match) or engine APIs that demand it (`add_to_group`, `Input.is_action_*`). Enums: compile-time exhaustive in `match`, no Variant dispatch, can't typo.
 
-**Container follows the key type — preference order:**
+**Container follows key type — preference order:**
 
-1. **`enum` + dense `Array` indexed by the enum int** (`ALL[Id.POTION]`). O(1) slot, no hash, no Variant boxing, contiguous. Default for any closed set. The enum *is* the index — no separate key structure (D4 positions array, D7 condition table, D11 registry are all this shape).
-2. **`StringName`-keyed `Dictionary`** — only when the key set is genuinely open / unbounded / external (mod-supplied ids, runtime-discovered names, engine group names). `StringName` interns + compares by pointer, so it beats `String` keys, but it is still a hash lookup with Variant values.
-3. **`String`-keyed `Dictionary`** — last resort. Only for keys that are literally text from outside (parsed JSON, file paths, user input) and never re-derived as an identifier.
+1. **`enum` + dense `Array` indexed by enum int** (`ALL[Id.POTION]`). O(1) slot, no hash, no Variant boxing, contiguous. Default for any closed set. Enum *is* index — no separate key structure (D4 positions array, D7 condition table, D11 registry all this shape).
+2. **`StringName`-keyed `Dictionary`** — only when key set genuinely open / unbounded / external (mod-supplied ids, runtime-discovered names, engine group names). `StringName` interns + compares by pointer, so beats `String` keys, but still hash lookup with Variant values.
+3. **`String`-keyed `Dictionary`** — last resort. Only for keys literally text from outside (parsed JSON, file paths, user input) and never re-derived as identifier.
 
-So: **enum + Array index > `StringName`-keyed Dict > `String`-keyed Dict.** Picking a `StringName` key is admitting the set is not closed — if it *is* closed, enum+Array collapses the lookup to a bare array index and the key disappears. Don't reach for a `StringName`-keyed dict on a finite known set "because it reads nicely" — that is the Variant-dispatch tax (D2a, P9) for no gain.
+So: **enum + Array index > `StringName`-keyed Dict > `String`-keyed Dict.** Picking `StringName` key = admitting set not closed — if it *is* closed, enum+Array collapses lookup to bare array index and key disappears. ⊥ reach for `StringName`-keyed dict on finite known set "because it reads nicely" — that = Variant-dispatch tax (D2a, P9) for no gain.
 
 ### D10a — Type as enum at API boundaries; int at wire format
 
-GDScript's enum is `int` under the hood; passing an int to an enum-typed param emits a warning but works. Discipline matters at the **API boundary**, where designer-intent surfaces in autocomplete + code-review scrutiny:
+GDScript's enum = `int` under hood; passing int to enum-typed param emits warning but works. Discipline matters at **API boundary**, where designer-intent surfaces in autocomplete + code-review scrutiny:
 
-- **Enum-typed**: registry public API (`get_def(id: Id)`), Resource fields holding a slot (`@export var id: ItemRegistry.Id`), method params receiving an enum literal from a known producer (`InventorySystem.consume_by_id(inv, item_id: Id, count: int)`).
-- **`int`-typed**: `PackedInt32Array` (Packed* can't carry an enum type), save-slot fields written to disk, return values that are *counts or indices* (`find_first → int`, `total_count → int`).
+- **Enum-typed**: registry public API (`get_def(id: Id)`), Resource fields holding a slot (`@export var id: ItemRegistry.Id`), method params receiving enum literal from known producer (`InventorySystem.consume_by_id(inv, item_id: Id, count: int)`).
+- **`int`-typed**: `PackedInt32Array` (Packed* can't carry enum type), save-slot fields written to disk, return values that are *counts or indices* (`find_first → int`, `total_count → int`).
 
-Wire format stays int because `PackedInt32Array` is the only fixed-width int container — saves implicitly cast back at read. The boundary line is "is this value enum-scoped at this surface, or is it a raw index/count?"
+Wire format stays int because `PackedInt32Array` = only fixed-width int container — saves implicitly cast back at read. Boundary line = "is this value enum-scoped at this surface, or raw index/count?"
 
 ## D11 — Mirror registries are coupling, not split
 
-D4 says "split data by access pattern, not domain object." It does NOT say "carry two parallel arrays keyed by the same discriminator." Two registries sharing one `enum Id` as their index → coupling, not split.
+D4 says "split data by access pattern, not domain object." Does NOT say "carry two parallel arrays keyed by same discriminator." Two registries sharing one `enum Id` as index → coupling, not split.
 
 ```gdscript
 # Bad — parallel arrays must stay length-aligned. Every new item edits
@@ -392,12 +392,12 @@ assert_eq(DropRegistry.SCENES.size(), ItemRegistry.Id.size())
 
 Fix one of two ways:
 
-1. **Fold the second registry into the first** as a derived/cached field (or method backed by ResourceLoader's own cache — see [`resource-loading.md`](resource-loading.md) "Don't roll your own cache").
-2. **Derive at runtime via convention** (D7a). `Id.SWORD_GRIP` → `res://scenes/items/sword_grip.tscn`. Boot validate confirms the file exists; runtime lookup is a single `load()`. The parity test goes away with the mirror.
+1. **Fold second registry into first** as derived/cached field (or method backed by ResourceLoader's own cache — see [`resource-loading.md`](resource-loading.md) "Don't roll your own cache").
+2. **Derive at runtime via convention** (D7a). `Id.SWORD_GRIP` → `res://scenes/items/sword_grip.tscn`. Boot validate confirms file exists; runtime lookup = single `load()`. Parity test goes away with mirror.
 
-Real D4 splits keep different shapes per access pattern — positions in `PackedVector3Array` on a manager, AI state in `Dictionary[int, RefCounted]` keyed by id, perception via `&"alerted"` group. None of them duplicate the index space.
+Real D4 splits keep different shapes per access pattern — positions in `PackedVector3Array` on manager, AI state in `Dictionary[int, RefCounted]` keyed by id, perception via `&"alerted"` group. None duplicate index space.
 
-Smell test: a parity-asserting test that checks `len(A) == len(B)` is the giveaway.
+Smell test: parity-asserting test checking `len(A) == len(B)` = giveaway.
 
 ---
 
