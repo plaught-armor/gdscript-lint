@@ -12,6 +12,28 @@ method on the data). This doc covers the four things *around* that shape:
 Worked example: [`tests/example_dod_save_proj/`](../tests/example_dod_save_proj).
 Measured numbers: [`tests/bench_save_proj/bench_save.gd`](../tests/bench_save_proj).
 
+## 0. Ownership — three layers, who touches what
+
+Recurring confusion: "where does the logic that turns saved IDs back into
+objects live, and does it run *after* load finishes?" Answer: it **is** the load
+— its second half — and it belongs to the object *owner*, never the save class.
+
+| Layer | Owns | Touches |
+|---|---|---|
+| Save/load class | bytes ↔ plain dict of POD (ints, `Vector2`, `String`) | `get_var(false)`, `var_to_bytes` — **never an Object ref** |
+| Owning system (Manager / spawner / registry) | dict ↔ live objects | reads ids, `get_def(id)` / `instantiate`, pours remaining POD fields onto the fresh instance, rebuilds graph |
+| The objects | their own fields | nothing about disk |
+
+- **Load = two halves, not "load then a separate assign step":** (1) bytes → plain
+  dict; (2) dict → live objects. Half 2 is the reconstruction — spawn from id,
+  then assign the *rest* of the POD (position `Vector2`, name `String`, …) onto
+  the new instance. Same pass, all fields, not just the id.
+- **Why the owner, not the save class:** the save class holding object refs to
+  rebuild is exactly the scope leak that forces `get_var(true)`. Keep it a dumb
+  data pump — POD in, POD out, no Object it could be tricked into constructing
+  (§2). The Manager already owns object lifecycle (dod.md D4/D8) → natural home
+  for the rebuild loop. Not overengineering; the correct seam.
+
 ## Rule of thumb
 
 > **Binary `var_to_bytes` for bytes. Relational dict for the record. zstd for
