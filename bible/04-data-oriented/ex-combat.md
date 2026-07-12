@@ -150,7 +150,7 @@ working across a kill.
 
 `kill(slot)` is the right tool for **one** removal. For a **mass** removal — an
 AoE drops a dozen at once — repeated swap-back loses to a single **write-cursor
-compaction** ([removing dead entities](note-removing-dead-entities.md), measured). The
+compaction** ([removing dead entities](../03-performance/note-removing-dead-entities.md), measured). The
 manager carries both; `cull()` packs survivors down in one pass and keeps order:
 
 ```gdscript

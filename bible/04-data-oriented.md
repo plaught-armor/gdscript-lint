@@ -770,7 +770,7 @@ Two things to watch:
 - **Getting the dead *out* of the manager's list** has its own measured answer:
   swap-back for a single removal, write-cursor *compaction* for culling a whole
   subset (it beats repeated swap-back and keeps order), never `remove_at` in a
-  loop. See [removing dead entities](04-data-oriented/note-removing-dead-entities.md).
+  loop. See [removing dead entities](03-performance/note-removing-dead-entities.md).
 - **The dispatch win is in SoA, not the loop.** Don't reach for a manager-of-nodes
   *for speed* — it's a loss. Reach for it for control (skip/LOD), or go full SoA
   for the speed. And measure first: Part III's heuristic, `(call cost ns) ×
@@ -862,7 +862,7 @@ that demand it (`add_to_group`, `Input.is_action_*`). And when the choice is
 `StringName` vs plain `String` (not vs an enum) — use `StringName` for
 *identifiers* (compared, looked up, handed to an engine API), `String` for *text*
 you build or display. Measured + the full when-each: [StringName vs
-String](04-data-oriented/note-stringname-vs-string.md). Preference order for an identifier: **enum >
+String](02-type-async/note-stringname-vs-string.md). Preference order for an identifier: **enum >
 StringName > String**.
 
 The enum wins are layered:

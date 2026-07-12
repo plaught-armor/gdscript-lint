@@ -85,7 +85,7 @@ The removal is **swap-back**, not `remove_at`: an alive-set is *unordered*
 (membership, not sequence), so overwrite the dead slot with the last element and
 drop the tail — O(1), no element shift. `remove_at(i)` would shift every element
 after `i` down one (O(n)); reserve that for sets whose order is load-bearing. This
-is the [removing-dead-entities](note-removing-dead-entities.md) note's "swap-back
+is the [removing-dead-entities](../03-performance/note-removing-dead-entities.md) note's "swap-back
 for a single removal" — a real project packages it as the `SwapBackArray` addon;
 the example inlines it to stay dependency-free.
 

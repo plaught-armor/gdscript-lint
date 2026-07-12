@@ -58,7 +58,7 @@ func spawn(pos: Vector2, vel: Vector2, ttl: float) -> int:
   (not all CAP), advances each inline, and culls the expired in one **write-cursor
   compaction** pass: survivors compact toward cursor `w`, expired slots return to
   `_free`, and a single `resize` drops the tail. This is the
-  [removing-dead-entities](note-removing-dead-entities.md) note's *subset-cull*
+  [removing-dead-entities](../03-performance/note-removing-dead-entities.md) note's *subset-cull*
   shape — it beats repeated swap-back when more than one slot expires in a pass,
   and it's a clean forward `for`, not a hand-rolled `while`:
 

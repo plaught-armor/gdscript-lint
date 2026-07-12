@@ -43,12 +43,12 @@ The rules composed, runnable + verified. Each carries a researched "variants & u
 
 ## Technique notes
 
-Measured single-topic deep-dives. Files prefixed `note-`, in `04-data-oriented/`.
+Measured single-topic deep-dives. Files prefixed `note-`, filed under the chapter they belong to (`02-type-async/`, `03-performance/`).
 
 | Note | Covers |
 |---|---|
-| [Removing dead entities](04-data-oriented/note-removing-dead-entities.md) | swap-back vs write-cursor compaction vs the `remove_at` trap; one removal vs mass cull have different best answers (P6 + D2 + D8) |
-| [StringName vs String](04-data-oriented/note-stringname-vs-string.md) | use `StringName` (`&"x"`) for identifiers, `String` for text; measured ~1.2×, but mostly correctness + engine-API contract, not speed (D10 + P12a/P12b) |
+| [Removing dead entities](03-performance/note-removing-dead-entities.md) | swap-back vs write-cursor compaction vs the `remove_at` trap; one removal vs mass cull have different best answers (P6 + D2 + D8) |
+| [StringName vs String](02-type-async/note-stringname-vs-string.md) | use `StringName` (`&"x"`) for identifiers, `String` for text; measured ~1.2×, but mostly correctness + engine-API contract, not speed (D10 + P12a/P12b) |
 
 ## Snippet style (good vs bad)
 
