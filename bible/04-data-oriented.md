@@ -586,6 +586,31 @@ What this gets you:
   key is always present — the `.get` form is defensive code that hides
   contract violations (S7).
 
+**When the table is numeric and keyed by closed enum(s), densify the layout.**
+The `Dictionary`-of-`Dictionary` above is the general shape — any hashable key,
+any value. When *both* keys are closed enums and the values are numbers, the
+data wants a dense form: `Array[PackedFloat32Array]` indexed by the enums
+directly, no hash on either axis.
+
+```gdscript
+# Both dims dense — weapon indexes the outer Array, armor the packed inner.
+static var DAMAGE_MULT: Array[PackedFloat32Array] = [
+    [1.0, 0.8, 0.5],   # W.PISTOL  → [A.NONE, A.LIGHT, A.HEAVY]
+    [1.5, 1.1, 0.7],   # W.SHOTGUN
+]
+func damage_multiplier(w: int, a: int) -> float: return DAMAGE_MULT[w][a]
+```
+
+Two constraints, both load-bearing. It can **never be `const`** — a `const`
+`Packed*Array` reports byte-count size and reads `0.0` (Part I **C1**); use
+`static var` + `make_read_only()` (**C2a**). And the outer enum must be a dense
+0-based run for the Array index to line up. A sparse/gappy outer key keeps a
+`Dictionary[Id, PackedFloat32Array]` outer instead — verified working on 4.8.dev
+(enum key type parses, keys store as int, `Packed*` values read back correct),
+with **C15** ([#116947](https://github.com/godotengine/godot/issues/116947)) not
+reproducing in that shape. Which container the enum picks is 4i's call; the point
+here is that a numeric closed×closed table is dense data, not a nest of hashes.
+
 When this doesn't apply: keys open-ended (user-supplied tag strings,
 externally-named events), or behavior conditional on multiple non-discriminator
 inputs (the cell value isn't just a number — it's a `(value, animation, sound)`
@@ -849,6 +874,22 @@ The enum wins are layered:
   silently fails.
 - **No Variant dispatch** through a `StringName`-keyed `Dictionary` when an
   `enum` index into an array would do.
+
+**A dense enum key collapses the container.** When the set is closed and
+0-based, the enum *is* the array index — `ALL[Id.POTION]`, the 4f damage table,
+a 4d positions array — and there's no key structure left to hash. That's why the
+4f numeric table prefers `Array[PackedFloat32Array]` over a `Dictionary`: the
+enum indexes the array directly.
+
+The mixed case — enum key, `Packed*Array` value — is verified on 4.8.dev:
+`Dictionary[Id, PackedFloat32Array]` parses, the enum key stores as int, values
+read back correct, and **C15**
+([#116947](https://github.com/godotengine/godot/issues/116947)) does not
+reproduce in that shape. One constraint carries over from the `Packed*` rules:
+`static var`, never `const` — a `const` `Packed*Array` reads `0.0` (Part I
+**C1**). When the enum is dense, prefer the `Array[PackedFloat32Array]` form
+anyway; it drops the hash entirely and sidesteps C15 by not being a typed Dict at
+all. Keep `Dictionary[Id, Packed*]` only for a sparse or gappy outer key.
 
 ### Type as enum at API boundaries; int at wire format (D10a)
 
