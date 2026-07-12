@@ -6,7 +6,7 @@ D2 leaves open: *which container holds the membership, and at what scope?* The
 answer is **D2b** — a Godot group is a tree-global namespace, so ration it like an
 autoload; when one owner sees every add and remove, that owner holds the set
 directly. Runnable:
-[`tests/example_dod_membership_proj/`](../tests/example_dod_membership_proj/),
+[`tests/example_dod_membership_proj/`](../../tests/example_dod_membership_proj/),
 verified on 4.8.dev.
 
 **In plain terms:** two rooms each have some enemies. "How many are alive in room

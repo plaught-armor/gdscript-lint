@@ -159,7 +159,7 @@ def main(argv: list[str]) -> int:
     bible = Path(argv[1])
     gdlint = argv[2] if len(argv) > 2 else str(bible.parent / "gd-lint.py")
     good_segs = no_good = fails = 0
-    for md_path in sorted(bible.glob("*.md"))[:MAX_FILES]:
+    for md_path in sorted(bible.rglob("*.md"))[:MAX_FILES]:
         text = md_path.read_text(encoding="utf-8", errors="replace")
         for start, block in extract_blocks(text):
             targets = good_targets(block)

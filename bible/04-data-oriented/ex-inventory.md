@@ -3,7 +3,7 @@
 A third worked subsystem (after [combat](ex-combat.md) and
 [perception](ex-perception.md)), built around **D11**: two parallel
 tables keyed by the same enum aren't a "split" — they're one fact stored twice.
-Runnable: [`tests/example_dod_inventory_proj/`](../tests/example_dod_inventory_proj/),
+Runnable: [`tests/example_dod_inventory_proj/`](../../tests/example_dod_inventory_proj/),
 verified on 4.8.dev.
 
 **In plain terms:** there's one list of item definitions. The icon for each item

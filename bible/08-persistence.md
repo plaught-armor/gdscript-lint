@@ -5,7 +5,7 @@ without losing old saves. Distinct from [Part VI](06-resource-loading.md), which
 loads designer-*authored* assets; this is the *save game* path.
 
 The record's **shape** — POD, ids-not-objects, relational, sparse delta — is a
-data-oriented question, worked end to end in the [save/load example](ex-save.md)
+data-oriented question, worked end to end in the [save/load example](08-persistence/ex-save.md)
 (D1/D3/D4/D6). This part is the machinery *around* that shape, and it has one
 genuinely dangerous corner and one place the common wisdom is simply wrong:
 
@@ -109,7 +109,7 @@ Three things to internalize:
 And the structural point (4): **a save never needs an Object in the first
 place.** Store ids and POD (D3); resolve ids → live `Def` through a registry on
 load. If you find yourself wanting `allow_objects = true`, you skipped the
-record-shape step in [ex-save](ex-save.md), and the fix is upstream — flatten to
+record-shape step in [ex-save](08-persistence/ex-save.md), and the fix is upstream — flatten to
 ids — not a dangerous flag downstream.
 
 ## 8d. Compression — measured, and the wisdom it overturns
@@ -200,7 +200,7 @@ For power-loss safety, **double-buffer** two slots (`slot_a` / `slot_b`) plus a
 tiny "newest-and-valid" pointer, and never overwrite the slot you'd fall back to.
 Always write to **`user://`**, never `res://` (read-only in an exported build).
 Web/export quirks (HTML5 IndexedDB, `JavaScriptBridge.force_fs_sync()`) are in
-[ex-save](ex-save.md#web--export-quirks).
+[ex-save](08-persistence/ex-save.md#web--export-quirks).
 
 ## 8f. Migration — additive record, version byte for format breaks
 
@@ -226,7 +226,7 @@ Two different changes, two different mechanisms:
 
 ## Where the pieces live
 
-- **Record shape, runnable** — [ex-save](ex-save.md): POD, ids-not-objects,
+- **Record shape, runnable** — [ex-save](08-persistence/ex-save.md): POD, ids-not-objects,
   relational split, sparse delta, the full naive→DOD walkthrough, a use-case
   sheet (settings / slots / inventory / autosave / quest flags / thumbnails), and
   web-export quirks.

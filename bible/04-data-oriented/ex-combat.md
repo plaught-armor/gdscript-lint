@@ -3,7 +3,7 @@
 Part IV gives the rules one at a time, each with a small bad/good snippet. This
 walks a *single subsystem* — enemy combat — from the naive object-oriented shape
 to a data-oriented one, so you can see the rules **compose** rather than stand
-alone. The code is real and runnable: [`tests/example_dod_combat_proj/`](../tests/example_dod_combat_proj/),
+alone. The code is real and runnable: [`tests/example_dod_combat_proj/`](../../tests/example_dod_combat_proj/),
 verified on Godot 4.8.dev (output at the bottom is a literal run, not a sketch).
 
 **In plain terms:** instead of ten separate "do it this way" tips, here's one

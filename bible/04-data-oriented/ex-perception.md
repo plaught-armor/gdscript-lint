@@ -4,7 +4,7 @@ A second worked subsystem (after [the combat example](ex-combat.md)), chosen
 because perception is where two rules earn their keep most visibly: **existence-
 based state (D2)** and the **corrected D8** — a manager wins by *doing less* and by
 working *flat data inline*, not by looping nodes and calling a method per entity.
-Runnable: [`tests/example_dod_perception_proj/`](../tests/example_dod_perception_proj/),
+Runnable: [`tests/example_dod_perception_proj/`](../../tests/example_dod_perception_proj/),
 verified on 4.8.dev.
 
 **In plain terms:** guards notice a player who walks near them, and stay alert for

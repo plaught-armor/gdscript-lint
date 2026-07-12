@@ -5,7 +5,7 @@ stats`, and the standout pattern here is the **authoring-equivalence test**: whe
 a generator (`apply_part`) and a hand-authored output (`sword_mk2.tres`) both
 exist, a test locks them equal so a designer bumping one side without the other
 **fails loud**. Runnable:
-[`tests/example_dod_upgrade_proj/`](../tests/example_dod_upgrade_proj/), verified
+[`tests/example_dod_upgrade_proj/`](../../tests/example_dod_upgrade_proj/), verified
 on 4.8.dev.
 
 **In plain terms:** upgrading a weapon is just math on numbers — take the base

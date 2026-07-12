@@ -5,14 +5,14 @@ state as container membership, references by ID, schema by access pattern.
 
 Draws from [`../rules/dod.md`](../rules/dod.md). For the rules **composed** into
 runnable subsystems — strawman → data-oriented decomposition, with verified
-output — see the worked examples: [combat](ex-combat.md) (D1–D8 + P6 + C2a +
-swap-back/cull), [perception](ex-perception.md) (existence-based state +
-the corrected D8), [membership](ex-membership.md) (D2b — owner-held array vs
-tree-global group), [inventory](ex-inventory.md) (D11 — one table, no
-mirrors), [object pool](ex-pool.md) (P21 free-list + slot reuse),
-[spatial hash](ex-spatial.md) (neighbor queries that do less),
-[save/load](ex-save.md) (relational POD, ids not objects), and
-[stat/upgrade](ex-upgrade.md) (modifier transform + authoring-equivalence test).
+output — see the worked examples: [combat](04-data-oriented/ex-combat.md) (D1–D8 + P6 + C2a +
+swap-back/cull), [perception](04-data-oriented/ex-perception.md) (existence-based state +
+the corrected D8), [membership](04-data-oriented/ex-membership.md) (D2b — owner-held array vs
+tree-global group), [inventory](04-data-oriented/ex-inventory.md) (D11 — one table, no
+mirrors), [object pool](04-data-oriented/ex-pool.md) (P21 free-list + slot reuse),
+[spatial hash](04-data-oriented/ex-spatial.md) (neighbor queries that do less),
+[save/load](08-persistence/ex-save.md) (relational POD, ids not objects), and
+[stat/upgrade](04-data-oriented/ex-upgrade.md) (modifier transform + authoring-equivalence test).
 
 ---
 
@@ -407,7 +407,7 @@ is the second question: *whose* membership, at *what* scope. A group is one of
 three containers, not the default; spend it when the set is genuinely global and
 decoupled, keep it local otherwise. A group is a global tool — spend it like one.
 
-Runnable: [the membership example](ex-membership.md) — two rooms, owner-held
+Runnable: [the membership example](04-data-oriented/ex-membership.md) — two rooms, owner-held
 arrays vs a tree-global `&"alive"`, plus the legit `&"interactable"` group, with
 verified output ([`tests/example_dod_membership_proj/`](../tests/example_dod_membership_proj/)).
 
@@ -770,7 +770,7 @@ Two things to watch:
 - **Getting the dead *out* of the manager's list** has its own measured answer:
   swap-back for a single removal, write-cursor *compaction* for culling a whole
   subset (it beats repeated swap-back and keeps order), never `remove_at` in a
-  loop. See [removing dead entities](note-removing-dead-entities.md).
+  loop. See [removing dead entities](04-data-oriented/note-removing-dead-entities.md).
 - **The dispatch win is in SoA, not the loop.** Don't reach for a manager-of-nodes
   *for speed* — it's a loss. Reach for it for control (skip/LOD), or go full SoA
   for the speed. And measure first: Part III's heuristic, `(call cost ns) ×
@@ -862,7 +862,7 @@ that demand it (`add_to_group`, `Input.is_action_*`). And when the choice is
 `StringName` vs plain `String` (not vs an enum) — use `StringName` for
 *identifiers* (compared, looked up, handed to an engine API), `String` for *text*
 you build or display. Measured + the full when-each: [StringName vs
-String](note-stringname-vs-string.md). Preference order for an identifier: **enum >
+String](04-data-oriented/note-stringname-vs-string.md). Preference order for an identifier: **enum >
 StringName > String**.
 
 The enum wins are layered:

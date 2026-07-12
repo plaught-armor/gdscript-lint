@@ -28,27 +28,27 @@ Part IV opens with **"The case for DOD (even in GDScript)"** — a position piec
 
 ## Worked examples
 
-The rules composed, runnable + verified. Each carries a researched "variants & use-cases" section. Backed by `tests/example_dod_*_proj/` and literal runs on 4.8.dev. Files prefixed `ex-`.
+The rules composed, runnable + verified. Each carries a researched "variants & use-cases" section. Backed by `tests/example_dod_*_proj/` and literal runs on 4.8.dev. Files prefixed `ex-`, filed under the chapter folder they support (`04-data-oriented/`; save/load in `08-persistence/`).
 
 | Example | Covers |
 |---|---|
-| [combat](ex-combat.md) | enemy-combat subsystem, fat-`Enemy` strawman → data-oriented decomposition (D1–D8 + P6 + C2a) |
-| [perception](ex-perception.md) | existence-based alert state + the corrected D8 (inline SoA, do-less) |
-| [membership](ex-membership.md) | D2b — owner-held `Array` vs tree-global `&"alive"` group; ration groups like autoloads |
-| [inventory](ex-inventory.md) | D11, one registry table with convention-derived assets, no mirror arrays |
-| [object pool](ex-pool.md) | P21 free-list + slot reuse, no per-frame alloc |
-| [spatial hash](ex-spatial.md) | cell→occupants neighbor queries that touch a constant few cells |
-| [save/load](ex-save.md) | relational POD record, ids not objects, with the binary-vs-JSON security boundary |
-| [stat/upgrade](ex-upgrade.md) | modifier-order transform + the authoring-equivalence test (generator vs hand-authored `.tres`, locked equal) |
+| [combat](04-data-oriented/ex-combat.md) | enemy-combat subsystem, fat-`Enemy` strawman → data-oriented decomposition (D1–D8 + P6 + C2a) |
+| [perception](04-data-oriented/ex-perception.md) | existence-based alert state + the corrected D8 (inline SoA, do-less) |
+| [membership](04-data-oriented/ex-membership.md) | D2b — owner-held `Array` vs tree-global `&"alive"` group; ration groups like autoloads |
+| [inventory](04-data-oriented/ex-inventory.md) | D11, one registry table with convention-derived assets, no mirror arrays |
+| [object pool](04-data-oriented/ex-pool.md) | P21 free-list + slot reuse, no per-frame alloc |
+| [spatial hash](04-data-oriented/ex-spatial.md) | cell→occupants neighbor queries that touch a constant few cells |
+| [save/load](08-persistence/ex-save.md) | relational POD record, ids not objects, with the binary-vs-JSON security boundary |
+| [stat/upgrade](04-data-oriented/ex-upgrade.md) | modifier-order transform + the authoring-equivalence test (generator vs hand-authored `.tres`, locked equal) |
 
 ## Technique notes
 
-Measured single-topic deep-dives. Files prefixed `note-`.
+Measured single-topic deep-dives. Files prefixed `note-`, in `04-data-oriented/`.
 
 | Note | Covers |
 |---|---|
-| [Removing dead entities](note-removing-dead-entities.md) | swap-back vs write-cursor compaction vs the `remove_at` trap; one removal vs mass cull have different best answers (P6 + D2 + D8) |
-| [StringName vs String](note-stringname-vs-string.md) | use `StringName` (`&"x"`) for identifiers, `String` for text; measured ~1.2×, but mostly correctness + engine-API contract, not speed (D10 + P12a/P12b) |
+| [Removing dead entities](04-data-oriented/note-removing-dead-entities.md) | swap-back vs write-cursor compaction vs the `remove_at` trap; one removal vs mass cull have different best answers (P6 + D2 + D8) |
+| [StringName vs String](04-data-oriented/note-stringname-vs-string.md) | use `StringName` (`&"x"`) for identifiers, `String` for text; measured ~1.2×, but mostly correctness + engine-API contract, not speed (D10 + P12a/P12b) |
 
 ## Snippet style (good vs bad)
 

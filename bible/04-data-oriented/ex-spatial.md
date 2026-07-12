@@ -3,7 +3,7 @@
 Worked example #5. "Who is near point P?" is the query behind perception, aggro,
 flocking, and AoE — and answered naively it's O(N) per query, O(N²) for all-pairs.
 A spatial hash makes it cost a **constant handful of cells**, independent of N.
-Runnable: [`tests/example_dod_spatial_proj/`](../tests/example_dod_spatial_proj/),
+Runnable: [`tests/example_dod_spatial_proj/`](../../tests/example_dod_spatial_proj/),
 verified on 4.8.dev.
 
 **In plain terms:** chop the world into a grid of cells, and keep a list of which

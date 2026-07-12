@@ -3,7 +3,7 @@
 Worked example #6. Persistence is DOD's headline correctness win: **POD
 serializes trivially; object graphs don't.** A save is a flat relational record of
 ids and mutable deltas — not a blob of live references. Runnable:
-[`tests/example_dod_save_proj/`](../tests/example_dod_save_proj/), verified on
+[`tests/example_dod_save_proj/`](../../tests/example_dod_save_proj/), verified on
 4.8.dev.
 
 **In plain terms:** to save the game you write down *what changed* as plain

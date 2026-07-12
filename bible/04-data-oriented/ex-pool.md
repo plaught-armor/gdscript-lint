@@ -4,7 +4,7 @@ Worked example #4. Pooling is where "don't allocate in the hot loop" (P21) meets
 the dead-removal thread: a fixed bank of slots is **reused forever** — a spawn
 recycles a freed slot index instead of calling `.new()`, and an expiry returns
 the slot rather than `free()`-ing anything. Runnable:
-[`tests/example_dod_pool_proj/`](../tests/example_dod_pool_proj/), verified on
+[`tests/example_dod_pool_proj/`](../../tests/example_dod_pool_proj/), verified on
 4.8.dev.
 
 **In plain terms:** instead of creating a bullet object when you fire and
