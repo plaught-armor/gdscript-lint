@@ -286,14 +286,26 @@ fractional part dropped with no error (`repro_typing_traps.gd` → H7).
 
 ### H12 — `@export var` of a Resource type defaults to `null`
 
-`@export var def: ItemDef` doesn't get a default-constructed `ItemDef` — it
-defaults to `null`, and any code that touches `def.field` before the editor
-assigns one will crash with a "Cannot access property on null instance" error.
-Tracked as [#110394](https://github.com/godotengine/godot/issues/110394) (fixed
-**4.6**). On a Godot ≥ 4.6 target this is no longer a runtime trap, but a boot
-validator that errors on a still-null `@export` is still the right discipline —
+`@export var def: ItemDef` doesn't get a default-constructed `ItemDef` — an
+*unassigned* export defaults to `null`, and any code that touches `def.field`
+before something assigns one crashes with "Cannot access property on null
+instance." This is **by design and permanent** — an unassigned `@export`
+Resource is `null` on every Godot version, 4.6 included; nothing "fixes" it.
+The discipline is a boot validator that errors on a still-`null` `@export`, so
 the failure surfaces at the editor boundary instead of at first use. See
 `style.md` M10 / M10a.
+
+Distinct, and easy to conflate with the above:
+[#110394](https://github.com/godotengine/godot/issues/110394) — *"Resource
+silently fails to load with specific combination of @export/preload/globals/
+script references."* There an `@export` Resource that **is** assigned in the
+inspector silently loaded as `null` at runtime under a particular preload /
+cyclic-script arrangement — correct in edit mode, `null` at play, **no error
+logged**. That one *was* a bug, fixed in **4.6** by
+[PR #109345](https://github.com/godotengine/godot/pull/109345) ("Prevent
+shallow scripts from leaking into the `ResourceCache`"). The same boot
+validator catches it too; on a ≥ 4.6 target the silent-corruption path itself
+is gone, but the by-design null-default above is not — keep the validator.
 
 ### H11 — Typed Dict + JSON.parse_string
 
