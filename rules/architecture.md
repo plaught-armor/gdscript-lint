@@ -25,7 +25,7 @@ project_root/
 └── addons/             # third-party + MCP
 ```
 
-Why: data (`resources/`) separate from behavior (`scripts/`); dep-graph leaves (`scenes/`, `resources/`) never import scripts/ → no `.tres ↔ .tscn` cycles (C17). Designer touches `resources/`, programmer touches `scripts/`, both touch `scenes/`.
+Why: data (`resources/`) separate from behavior (`scripts/`); dep-graph leaves (`scenes/`, `resources/`) never import scripts/ → no `.tres ↔ .tscn` cycles (C17, [#80877](https://github.com/godotengine/godot/issues/80877)). Designer touches `resources/`, programmer touches `scripts/`, both touch `scenes/`.
 
 ## Canonical autoloads + globals
 
@@ -161,7 +161,7 @@ Parent scene-root calls `_hud.init_hud(...)` once. Controllers borrow widgets vi
 | Two arrays sharing same `enum Id` index? | One is a mirror — fold into D1 record or derive by convention | [`dod.md`](dod.md) D11 |
 | `preload` or `load`? | Preload constants (defs, icons, tables); load variables (pickup scenes, story content) | [`resource-loading.md`](resource-loading.md) |
 | Boot validator expensive (instantiate scenes)? | Wrap in `if OS.has_feature("editor"):` | [`style.md`](style.md) M10a |
-| Inverse `.tres → .tscn` ref? | Convention-derived (D7a) or String path. Never `PackedScene` ext_resource on `.tres` | [`engine-bugs.md`](engine-bugs.md) C17 |
+| Inverse `.tres → .tscn` ref? | Convention-derived (D7a) or String path. Never `PackedScene` ext_resource on `.tres` | [`engine-bugs.md`](engine-bugs.md) C17 ([#80877](https://github.com/godotengine/godot/issues/80877)) |
 | Flagged `has_method(&"...")` + `call(&"...")` | Extract shared base class, dispatch via `is` | [`style.md`](style.md) H13 |
 
 Project-local rules conflict → project wins.
