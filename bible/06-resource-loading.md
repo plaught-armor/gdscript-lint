@@ -13,7 +13,8 @@ silently do the right thing only if you know which default they're picking.
 
 This part lays out the cache's actual semantics, the three loading idioms and
 when each is correct, and the cache-hygiene rules learned the hard way —
-including a still-unfixed cycle bug ([#98551](https://github.com/godotengine/godot/issues/98551))
+including a still-unfixed resource-cycle bug ([#80877](https://github.com/godotengine/godot/issues/80877)
+tracker; [#109771](https://github.com/godotengine/godot/issues/109771))
 that bites every project that puts a `PackedScene` ext_resource on a `.tres`.
 
 Draws from [`../rules/resource-loading.md`](../rules/resource-loading.md).
@@ -272,9 +273,11 @@ either one — sometimes hanging the editor, sometimes leaving fields half-fille
 at runtime. Pick one direction (scene knows its data) and let the other side
 figure out its scene by naming convention or a string path.
 
-Engine bug C17 ([#98551](https://github.com/godotengine/godot/issues/98551))
-— preload cycles can hang or load partial Resources. Pure GDScript-script
-cycles were fixed in 4.3 (#70985), but `.tres → .tscn → .tres` resource
+Engine bug C17 ([#80877](https://github.com/godotengine/godot/issues/80877)
+tracker; [#109771](https://github.com/godotengine/godot/issues/109771))
+— cycles can hang or load partial Resources. Pure GDScript-script /
+`preload()`-chain cycles were fixed in 4.3 (#70985, PR #93346 — #98551 was
+closed as their dup), but `.tres → .tscn → .tres` resource
 cycles **remain unfixed** at time of writing. The cycle most often forms like
 this:
 
@@ -424,7 +427,8 @@ If you take three things from this part:
 3. **`.tres` is a leaf in the dependency graph.** `.tscn` references `.tres`;
    code references `.tres`; `.tres` does not reference back to `.tscn`. The
    `.tres → .tscn → .tres` cycle bug
-   ([#98551](https://github.com/godotengine/godot/issues/98551)) is still
+   ([#80877](https://github.com/godotengine/godot/issues/80877) tracker;
+   [#109771](https://github.com/godotengine/godot/issues/109771)) is still
    unfixed, and the convention-derived dispatch in D7a is how you avoid it.
 
 The defaults are right almost always. The two places to be careful are the

@@ -54,7 +54,7 @@ When boot validate instantiates scenes / walks resources (mesh decode, texture u
 
 ## No bidirectional `.tres ↔ .tscn` ext_resource
 
-Engine bug C17 ([#98551](https://github.com/godotengine/godot/issues/98551)) — preload cycles can hang or load partial Resources. Cycles most often form as `.tres → .tscn → .tres`:
+Engine bug C17 ([#80877](https://github.com/godotengine/godot/issues/80877) tracker; [#109771](https://github.com/godotengine/godot/issues/109771)) — cycles can hang or load partial Resources (script/`preload()`-chain form fixed 4.3 by #70985/PR #93346, #98551 was its dup; the resource form still bites). Cycles most often form as `.tres → .tscn → .tres`:
 
 - `.tscn` ext_resources its data `.tres` (normal — pickup scene references ItemDef).
 - `.tres` adds `@export var pickup_scene: PackedScene` pointing back at `.tscn`.

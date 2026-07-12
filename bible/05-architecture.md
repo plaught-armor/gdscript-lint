@@ -55,8 +55,9 @@ Three properties earn this layout:
 2. **The dependency graph has obvious leaves.** `scenes/` and `resources/` never
    import each other in a cycle; the rule is "scripts may reference data, data
    never references scripts." That alignment with the engine's resource graph
-   sidesteps the `.tres ↔ .tscn` cycle bug → see Part I, **C17**
-   ([#98551](https://github.com/godotengine/godot/issues/98551)).
+   sidesteps the `.tres ↔ .tscn` resource-cycle bug → see Part I, **C17**
+   ([#80877](https://github.com/godotengine/godot/issues/80877) tracker;
+   [#109771](https://github.com/godotengine/godot/issues/109771)).
 3. **`scripts/` is split by *what the script is*, not what it does.** `data/`
    holds POD records; `systems/` holds stateless static-fn helpers; `nodes/`
    holds gameplay Node scripts. That mirrors the three things GDScript files

@@ -325,8 +325,10 @@ from a naming rule or a string path so only one direction is hard-wired.
 ext_resources the same `.tres`. The engine attempts to resolve the cycle and
 either hangs at load, returns a partially-initialised Resource (fields are
 null when they shouldn't be), or fails with an obscure cycle error. Pure
-GDScript script-level cycles were fixed in 4.3 ([#70985](https://github.com/godotengine/godot/issues/70985))
-— the `.tres → .tscn → .tres` *resource* form is the one that's still live.
+GDScript script-level / `preload()`-chain cycles were fixed in 4.3
+([#70985](https://github.com/godotengine/godot/issues/70985), PR
+[#93346](https://github.com/godotengine/godot/pull/93346)) — the
+`.tres → .tscn → .tres` *resource* form is the one that's still live.
 
 **Repro.** An `ItemDef.tres` carries `@export var pickup_scene: PackedScene`,
 and `pickup.tscn` ext_resources `ItemDef.tres` for its data. Loading either
@@ -352,8 +354,17 @@ for the broader `preload` / `load` rule of thumb, and **D11** for why a
 parallel "scenes" registry mirroring the data registry is a coupling smell,
 not a split.
 
-**Issue / status.** [#98551](https://github.com/godotengine/godot/issues/98551).
-Script-level form fixed in 4.3; **resource-level form still live**. **Re-tested on
+**Issue / status.** Script-level / `preload()`-chain cycles were fixed in 4.3
+([#70985](https://github.com/godotengine/godot/issues/70985), PR
+[#93346](https://github.com/godotengine/godot/pull/93346)) — and
+[#98551](https://github.com/godotengine/godot/issues/98551) ("Preloading
+resources with cyclic dependencies fail") was **closed as a duplicate of
+#70985**, so despite its name it documents that script-chain form, not this
+one. The `.tres → .tscn → .tres` **resource-level form is still live**, tracked
+among the open cyclic-dependency issues
+([#80877](https://github.com/godotengine/godot/issues/80877) tracker;
+[#109771](https://github.com/godotengine/godot/issues/109771), 4.5,
+`@export PackedScene` cross-reference). **Re-tested on
 Godot 4.8.dev** (`tests/repro_cycle_proj/`): a real `thing.tres → thing.tscn →
 thing.tres` cycle does **not deadlock** (the 4.3 fix prevents the hang), but it
 still **partial-loads** — loading `thing.tres` resolves its `scene`, yet
@@ -489,7 +500,7 @@ disagree, trust the empirical column **for that build only**.
 | C14 | `range(n)` typed as `Array[int]` | [#110659](https://github.com/godotengine/godot/issues/110659) | **Live** | **Live** — `range()` element type is untyped |
 | C15 | typed Dict + `Packed*` value | [#116947](https://github.com/godotengine/godot/issues/116947) | **Live** (dup of #88753) | — (C1 fixed → re-check on target) |
 | C16 | `static var` inheritance | [#87629](https://github.com/godotengine/godot/issues/87629) | **Live** | Observed: subclass shares the base's `static var` |
-| C17 | `.tres ↔ .tscn` preload cycle | [#98551](https://github.com/godotengine/godot/issues/98551) | **Live** (script-level fixed 4.3) | **Live** — no hang, but partial-load: back-ref null + ext_resource error |
+| C17 | `.tres ↔ .tscn` resource cycle | [#80877](https://github.com/godotengine/godot/issues/80877) / [#109771](https://github.com/godotengine/godot/issues/109771) | **Live** (script/preload form fixed 4.3 — #98551 was its dup) | **Live** — no hang, but partial-load: back-ref null + ext_resource error |
 | H8 | freed-Node truthiness lies | [#59816](https://github.com/godotengine/godot/issues/59816) | **Fixed 4.4** (≤4.3 still lie) | **Confirmed fixed** — `is_instance_valid(freed)`=false |
 | H12 | `@export` Resource null on load | [#110394](https://github.com/godotengine/godot/issues/110394) | **Fixed 4.6** | **Confirmed fixed** — `@export` Resource survives scene load |
 | M9 | `Resource.duplicate(true)` skips Array | [#74918](https://github.com/godotengine/godot/issues/74918) | **Fixed 4.5** via `duplicate_deep()` | **Confirmed fixed** — deep-dup, original unaffected |
