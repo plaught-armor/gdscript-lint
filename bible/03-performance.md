@@ -309,7 +309,7 @@ Two more widely-assumed wins that don't hold:
 | Claim | Measured (Godot 4.8.dev) | Reality |
 |---|---|---|
 | `obj.method()` beats `obj.call(&"method")` | 1.19–1.21× | true, but modest — the real case against `call()` is **correctness** (typo → silent no-op), not speed → **H13** |
-| iterating `Array[int]` beats untyped `Array` | 0.93–0.97× | a **wash** — typed iteration isn't faster here. The case for typed `.filter()`/`.map()` (**C3**) and typed `range()` (**C14**) is *correctness* (the result is silently untyped, #72566 / #110659), not performance |
+| iterating `Array[int]` beats untyped `Array` | 0.93–0.97× | a **wash** — typed iteration isn't faster here. The case for typed `.filter()`/`.map()` (**C3**) and typed `range()` (**C14**) is *correctness* (the result is silently untyped, #72566 / #72627), not performance |
 
 This is the discipline the whole project runs on: a rule earns "blocking" only
 when the data backs it. C3/C9/C14 are blocking because they're **correctness**

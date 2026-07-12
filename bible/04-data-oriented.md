@@ -607,7 +607,8 @@ Two constraints, both load-bearing. It can **never be `const`** — a `const`
 0-based run for the Array index to line up. A sparse/gappy outer key keeps a
 `Dictionary[Id, PackedFloat32Array]` outer instead — verified working on 4.8.dev
 (enum key type parses, keys store as int, `Packed*` values read back correct),
-with **C15** ([#116947](https://github.com/godotengine/godot/issues/116947)) not
+with **C15** ([#116947](https://github.com/godotengine/godot/issues/116947), dup of
+[#88753](https://github.com/godotengine/godot/issues/88753)) not
 reproducing in that shape. Which container the enum picks is 4i's call; the point
 here is that a numeric closed×closed table is dense data, not a nest of hashes.
 
@@ -884,7 +885,8 @@ enum indexes the array directly.
 The mixed case — enum key, `Packed*Array` value — is verified on 4.8.dev:
 `Dictionary[Id, PackedFloat32Array]` parses, the enum key stores as int, values
 read back correct, and **C15**
-([#116947](https://github.com/godotengine/godot/issues/116947)) does not
+([#116947](https://github.com/godotengine/godot/issues/116947), dup of
+[#88753](https://github.com/godotengine/godot/issues/88753)) does not
 reproduce in that shape. One constraint carries over from the `Packed*` rules:
 `static var`, never `const` — a `const` `Packed*Array` reads `0.0` (Part I
 **C1**). When the enum is dense, prefer the `Array[PackedFloat32Array]` form

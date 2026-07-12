@@ -156,8 +156,10 @@ var indices: Array[int] = []  # gdlint: ignore[S6]
 indices.assign(range(10))
 ```
 
-Tracked as [#110659](https://github.com/godotengine/godot/issues/110659). →
-**C14**.
+Tracked as [#72627](https://github.com/godotengine/godot/issues/72627) ("Cannot
+cast typed arrays using type hints") — the range-specific report
+[#110659](https://github.com/godotengine/godot/issues/110659) was closed as its
+duplicate. → **C14**.
 
 ### H10b — Type the container, don't probe it
 

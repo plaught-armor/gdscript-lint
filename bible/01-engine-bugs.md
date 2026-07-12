@@ -420,7 +420,10 @@ Live on 4.8.dev, shorter repros:
   objects; the same loop with `n.free()` leaked 0 (`repro_node_leak.gd`). Node is
   not reference-counted, so dropping the var is not enough.*
 - **C14** — `range(n)` typed as `Array[int]` is actually untyped.
-  [#110659](https://github.com/godotengine/godot/issues/110659). **Live** —
+  [#72627](https://github.com/godotengine/godot/issues/72627) (canonical; the
+  range-specific report
+  [#110659](https://github.com/godotengine/godot/issues/110659) was closed as its
+  duplicate). **Live** —
   *4.8.dev: confirmed, `range()`'s element type is untyped
   (`repro_typed_collections.gd` → C14).*
 - **C15** — typed `Dictionary` + `Packed*` value type misbehaves; dup of
@@ -497,7 +500,7 @@ disagree, trust the empirical column **for that build only**.
 | C11 | `sort_custom` strict `<` | [#58878](https://github.com/godotengine/godot/issues/58878) | **Live** | Not stable by contract (this input held order) |
 | C12 | `assert()` stripped in release | — | **By design** | **Confirmed** — assert body runs in debug, stripped in release (ran=false) |
 | C13 | `Node.new()` leak | — | Pattern | **Confirmed** — 2000 unparented `Node.new()` leaked 2000; `free()` → 0 |
-| C14 | `range(n)` typed as `Array[int]` | [#110659](https://github.com/godotengine/godot/issues/110659) | **Live** | **Live** — `range()` element type is untyped |
+| C14 | `range(n)` typed as `Array[int]` | [#72627](https://github.com/godotengine/godot/issues/72627) (dup [#110659](https://github.com/godotengine/godot/issues/110659)) | **Live** | **Live** — `range()` element type is untyped |
 | C15 | typed Dict + `Packed*` value | [#116947](https://github.com/godotengine/godot/issues/116947) | **Live** (dup of #88753) | — (C1 fixed → re-check on target) |
 | C16 | `static var` inheritance | [#87629](https://github.com/godotengine/godot/issues/87629) | **Live** | Observed: subclass shares the base's `static var` |
 | C17 | `.tres ↔ .tscn` resource cycle | [#80877](https://github.com/godotengine/godot/issues/80877) / [#109771](https://github.com/godotengine/godot/issues/109771) | **Live** (script/preload form fixed 4.3 — #98551 was its dup) | **Live** — no hang, but partial-load: back-ref null + ext_resource error |
