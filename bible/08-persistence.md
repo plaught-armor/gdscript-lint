@@ -60,6 +60,21 @@ boundary where `.get`-with-default is correct ([Part III / rules S7](../rules/st
 otherwise mandate bracket access on known schemas) — a v1 file legitimately
 lacks a v2 key, and the default is the migration (§8f).
 
+```gdscript
+# Good — binary Variant (store_var): full type fidelity, safe by default,
+# fastest. The default for a Godot-only save.
+func save_slot(path: String, rec: Dictionary) -> void:
+    var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+    f.store_var(rec)             # Vector2i stays Vector2i, PackedStringArray stays packed
+    # need the bytes in hand for a compression layer? var_to_bytes(rec), same encoding
+
+# Good — JSON only for settings / cross-tool interop; every int decodes back as a
+# float and Godot types (Vector2i, typed arrays) collapse.
+func write_settings(path: String, cfg: Dictionary) -> void:
+    var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+    f.store_string(JSON.stringify(cfg))
+```
+
 ## 8c. Security — never deserialize an Object from a save
 
 This is the one corner of persistence that is *dangerous*, not just untidy. A
@@ -111,6 +126,20 @@ place.** Store ids and POD (D3); resolve ids → live `Def` through a registry o
 load. If you find yourself wanting `allow_objects = true`, you skipped the
 record-shape step in [ex-save](08-persistence/ex-save.md), and the fix is upstream — flatten to
 ids — not a dangerous flag downstream.
+
+```gdscript
+# Good — safe by default. get_var rejects Objects unless you opt in; the save
+# carries ids + POD, resolved to live Defs through a registry on load (D3).
+func load_slot(path: String) -> Dictionary:
+    var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+    var rec: Variant = f.get_var(false)      # allow_objects = false (also the default)
+    return rec if rec is Dictionary else {}
+
+# Bad — RCE. get_var(true) / bytes_to_var_with_objects / str_to_var build a forged
+# Object from attacker-controlled bytes and run its embedded script.
+var rec: Variant = f.get_var(true)           # allow_objects = true on untrusted input
+var cfg: Variant = str_to_var(FileAccess.get_file_as_string(path))
+```
 
 ## 8d. Compression — measured, and the wisdom it overturns
 

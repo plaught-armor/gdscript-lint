@@ -97,6 +97,22 @@ communication side, and it's why signals exist as a first-class language feature
 — see Part III for their cost (≈3× a direct call) and Part IV **P18** for when
 that cost is a bug.
 
+```gdscript
+# Good — parent reaches DOWN to a child by direct method call; the child talks UP
+# via a signal the common parent connects (M11 push-injection, seen from comms).
+class_name Enemy extends CharacterBody3D
+signal died(id: int)                      # up: announces, doesn't act on the result
+func take_hit(amount: int) -> void:       # down: the parent calls this on the child
+    _health -= amount
+    if _health <= 0:
+        died.emit(get_instance_id())
+
+class_name Arena extends Node             # the common parent owns the wiring
+func _ready() -> void:
+    for e: Enemy in _spawn_wave():
+        e.died.connect(_on_enemy_died)    # up-signal handled here, not in the enemy
+```
+
 ### Node vs Resource — the orthogonal axis
 
 **In plain terms:** Godot gives you two kinds of object. A "Node" is something
@@ -198,6 +214,21 @@ The classic composition win the sources cite: a behavior that several unrelated
 kinds need but can't inherit from a common base (GDQuest's example: a
 power-distribution behavior shared across machine types that "can't inherit from
 both"). That's a child-node-as-behavior, dropped into each scene.
+
+```gdscript
+# Good — a behavior several unrelated kinds need but can't share by inheritance,
+# dropped in as a child node. Machine and Door both hold a PowerSink; neither
+# inherits from the other, and the behavior is reused by composition.
+class_name PowerSink extends Node         # the reusable behavior, as a node
+signal power_lost
+var _draw: int = 0
+func set_supply(watts: int) -> void:
+    if watts < _draw:
+        power_lost.emit()
+
+class_name Machine extends Node3D
+@onready var _power: PowerSink = $PowerSink   # composed in, not inherited
+```
 
 ### Axis B — Script inheritance (`extends`)
 

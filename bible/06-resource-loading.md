@@ -396,6 +396,19 @@ A handful of smaller rules that don't justify a section each:
   duplication (its own footgun, M9 in
   [`../rules/type-async.md`](../rules/type-async.md)) only when the nested contents
   must be independent too.
+
+```gdscript
+# Bad — shallow duplicate shares nested containers. Mutating dup.tags mutates the
+# shared DoorDef too — every door that references it now carries the change.
+var dup: DoorDef = DOOR_DEF.duplicate()
+dup.tags.append(&"reinforced")            # also appended on DOOR_DEF.tags
+
+# Good — top-level per-instance fields are safe to mutate on the shallow copy;
+# reach for duplicate(true) only when a nested container must be independent (M9).
+var door_state: DoorDef = DOOR_DEF.duplicate()
+door_state.hp = DOOR_DEF.max_hp           # scalar field, copied — safe to mutate
+```
+
 - **`make_read_only()`** on `Array` / `Dictionary` after boot validate locks
   the structure against accidental mutation. Pairs with `static var` — see
   [`../rules/engine-bugs.md`](../rules/engine-bugs.md) C2a. Shallow only:
