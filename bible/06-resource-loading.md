@@ -186,6 +186,21 @@ The fix is one of two:
 
 Either fix removes the parallel table and the parity test that guarded it.
 
+```gdscript
+# Bad — a second table mirroring what ResourceLoader already keeps. Every entry
+# is also in the engine cache; ALL and SCENES must stay length-aligned forever.
+static var ALL: Array[ItemDef] = [null, preload("res://items/potion.tres")]
+static var SCENES: Dictionary[int, PackedScene] = {}   # the redundant "cache"
+static func _boot() -> void:
+    for id: int in range(1, ALL.size()):
+        SCENES[id] = load(ALL[id].scene_path)
+
+# Good — no parallel table. load() hits the ResourceLoader cache after the first
+# call; the engine's dedup IS the cache. Derive the path by convention (D7a).
+static func get_pickup_scene(id: Id) -> PackedScene:
+    return load("res://scenes/items/%s.tscn" % _basename(id))
+```
+
 ---
 
 ## 6d. Don't `ResourceLoader.exists()` after boot validate

@@ -327,6 +327,16 @@ element types eagerly. The trap that remains is a *direct* annotated assignment 
 an untyped parse result without `.assign()`; the discipline (convert explicitly at
 the boundary, prefer `.assign()`) is what makes the failure loud and immediate.
 
+```gdscript
+# Bad — the annotation lies. parse_string returns Variant; the inner types are
+# never checked, so a bad shape rides in and crashes at the first typed read.
+var scores: Dictionary[String, int] = JSON.parse_string(text)
+
+# Good — treat JSON as a boundary; .assign() validates eagerly and fails loud.
+var scores: Dictionary[String, int] = {}
+scores.assign(JSON.parse_string(text))   # raises HERE if a value isn't an int
+```
+
 ### H3 — Enums are an `int` at runtime; type the boundary
 
 GDScript enums are `int` under the hood. The compiler will accept a bare `int`
@@ -337,6 +347,19 @@ loops or save-format fields, `int` is the right choice (`PackedInt32Array` can't
 carry an enum type; save slots round-trip as `int`). This is covered in detail
 in [`../rules/dod.md`](../rules/dod.md) D10/D10a. **4.8.dev: confirmed** —
 `typeof(SomeEnum.MEMBER) == TYPE_INT` (`repro_typing_traps.gd` → H3).
+
+```gdscript
+# Bad — bare int at the boundary. Caller can pass 999; no autocomplete, no check.
+func get_def(slot: int) -> ItemDef:
+    return ALL[slot]
+
+# Good — enum-typed boundary (compiler-checked); int stays for the wire format.
+enum Id { NONE, POTION, SWORD_GRIP }
+func get_def(slot: Id) -> ItemDef:
+    return ALL[slot]
+@export var start_slot: Id                    # designer picks from a named list
+var wire: PackedInt32Array = [Id.POTION]      # save round-trips as int
+```
 
 ---
 
@@ -679,6 +702,19 @@ idle frame," use `await get_tree().process_frame`. **4.8.dev: confirmed** — af
 `call_deferred(&"f")` the target has not run on the next line (`ran=false`); it
 has run after one `await process_frame` (`ran=true`) (`repro_async2_proj/` → M7).
 → **M7**.
+
+```gdscript
+# Bad — assumes deferred = next tick. _spawn runs at end of THIS frame, before
+# the next _process; code reading state "after the spawn" sees the old value.
+func _process(_dt: float) -> void:
+    call_deferred(&"_spawn")
+    _count_spawned()               # still the OLD count — _spawn hasn't run yet
+
+# Good — same-frame idle work stays deferred; "next tick" awaits the frame.
+call_deferred(&"_spawn")           # runs after this call stack unwinds
+await get_tree().process_frame     # now the deferred work has run
+_count_spawned()                   # sees the new count
+```
 
 ### M8 — `create_tween()` is node-bound
 

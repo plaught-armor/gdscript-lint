@@ -514,6 +514,29 @@ The discipline question to ask before writing a class: *which transforms read
 or write these fields, at what rate?* If two transforms touch disjoint subsets,
 they're two different access patterns and the data wants to be split.
 
+```gdscript
+# Bad — one class, thirty fields, five systems. The physics loop reads 3, the AI
+# loop reads 6, inventory reads 1; every instance drags all thirty through every
+# tick, and the save format becomes one opaque blob.
+class_name Enemy extends CharacterBody3D
+var position: Vector3
+var ai_target_id: int
+var ai_state: int
+var ai_cooldown: float
+var inventory: Array
+var max_health: int
+var dialogue_lines: PackedStringArray
+# ...twenty more, touched by disjoint systems
+
+# Good — split by which loop touches the fields. The entity id is the join key,
+# and a subset with no entry simply isn't in that container (4b).
+class_name EnemyManager extends Node
+var _positions: PackedVector3Array = []      # physics loop reads in order, cache-warm
+var _ai: Dictionary[int, AIRecord] = {}      # only enemies mid-decision have an entry
+var _inventory: Dictionary[int, Array] = {}  # only enemies that carry one
+# perception is membership, not a field — the &"alerted" group
+```
+
 ---
 
 ## 4e. Hot/cold split (D5)
@@ -547,6 +570,29 @@ having every per-kind constant in one shared `.tres` a designer can edit.
 The structural test is: **if I added a tenth enemy kind tomorrow, where would
 the new fields go?** If the answer is "edit the runtime `Enemy` class," cold
 data is in the wrong place — it should be a new `EnemyDef.tres`.
+
+```gdscript
+# Bad — per-kind constants copied onto every instance. 500 goblins hold 500
+# copies of the same max_health, damage, model path, sound id.
+class_name Enemy extends CharacterBody3D
+var health: int                                    # hot — changes every hit
+var max_health: int = 40                           # cold — identical per goblin
+var damage: int = 7                                # cold
+var model_path: String = "res://enemies/goblin.glb"  # cold
+var hurt_sound: StringName = &"goblin_hurt"        # cold
+
+# Good — hot fields on the instance; cold fields in one shared EnemyDef.tres the
+# instance points at. Add a tenth enemy kind = a new .tres, not a class edit.
+class_name Enemy extends CharacterBody3D
+var health: int                                    # hot, per-instance
+var def: EnemyDef                                  # points at the shared cold data
+
+class_name EnemyDef extends Resource
+@export var max_health: int = 40
+@export var damage: int = 7
+@export var model_path: String = "res://enemies/goblin.glb"
+@export var hurt_sound: StringName = &"goblin_hurt"
+```
 
 ---
 
@@ -917,6 +963,23 @@ int container — saves implicitly cast back at read time. The boundary line is
 Once that line is clear, the warnings GDScript emits at int↔enum crossings
 become meaningful: every warning at that boundary either gets a deliberate
 cast or a corrected type, and warnings at non-boundary sites are bugs.
+
+```gdscript
+# Bad — StringName key for a closed set, and a bare int at the boundary. The typo
+# &"potiom" is a silent no-op; the literal 3 says nothing about intent.
+static func get_def(id: StringName) -> ItemDef:
+    return _by_name[id]
+InventorySystem.consume_by_id(inv, 3, 1)
+
+# Good — enum at the boundary (compiler-checked, autocompletes); int on the wire.
+enum Id { NONE, POTION, SWORD_GRIP }
+static func get_def(id: Id) -> ItemDef:
+    return ALL[id]                                # dense enum indexes the array
+static func consume_by_id(inv: Inventory, item_id: Id, count: int) -> int:
+    return _remove(inv, item_id, count)
+# save/load stays int — PackedInt32Array can't carry an enum type:
+var saved_ids: PackedInt32Array = [Id.POTION, Id.SWORD_GRIP]
+```
 
 ---
 

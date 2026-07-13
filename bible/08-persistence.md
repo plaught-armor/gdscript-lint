@@ -222,6 +222,28 @@ Two different changes, two different mechanisms:
   a dict record just leaves the old key unread. The third reason saves are dict
   records (D4), not serialized Resources.
 
+```gdscript
+# Bad — no version marker. Add zstd compression in v2 and every v1 save on disk
+# stops decoding — the bytes are opaque, there's no dict to pull defaults from.
+func load_slot(path: String) -> Dictionary:
+    var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+    return f.get_var()                    # was raw store_var; now framed — breaks
+
+# Good — magic + format-version byte first, branch the read path on it (D7b).
+const MAGIC: int = 0x4753                  # "GS"
+func load_slot(path: String) -> Dictionary:
+    var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+    if f.get_16() != MAGIC:
+        push_error("[save] bad magic"); return {}
+    var version: int = f.get_8()
+    if version == 1:
+        return f.get_var()                 # raw store_var payload
+    elif version == 2:
+        return _read_zstd(f)               # framed payload
+    push_error("[save] unknown version %d" % version)
+    return {}
+```
+
 ---
 
 ## Where the pieces live
