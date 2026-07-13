@@ -484,11 +484,32 @@ instead of limping along.
 `autoloads/` load in `project.godot` order. Order matters when one autoload
 references another:
 
+```ini
+# project.godot
+[autoload]
+RegistryRoot="*res://autoloads/registry_root.gd"
+SaveSystem="*res://autoloads/save_system.gd"
+SoundBus="*res://autoloads/sound_bus.gd"
+```
+
 1. **`RegistryRoot`** — forces every per-domain registry's `_static_init` by
    referencing it in `_ready`. Registries self-validate in `_static_init` and
    crash loud on failure.
 2. **`SaveSystem`** — depends on registries (deserialize by ID).
 3. **`SoundBus`** — pure pub-sub, no deps.
+
+`RegistryRoot` itself is tiny — it exists only to *name* each registry, so the
+engine loads (and thereby validates) it at boot:
+
+```gdscript
+# autoloads/registry_root.gd — autoload #1, bare `extends Node` (no class_name, 5b).
+extends Node
+
+func _ready() -> void:
+    # Each reference forces that registry's script to load → _static_init → _validate.
+    var _items: int = ItemRegistry.ALL.size()
+    var _enemies: int = EnemyRegistry.ALL.size()
+```
 
 `WorldConstants` is **not** autoloaded — it's a `class_name`'d static-only
 RefCounted, accessed globally without an `[autoload]` entry. See **D9** in
@@ -514,7 +535,14 @@ during autoload script loading, ahead of `RegistryRoot._ready` ever running.
 The order registries validate in follows load-dependency order, not the order
 of statements in `_ready`. What `RegistryRoot` guarantees is **reachability** —
 that each registry is named by a boot-loaded script at all — which is the real
-precondition for boot-time validation. See `tests/repro_static_init_proj/`.
+precondition for boot-time validation. The observed order
+(`tests/repro_static_init_proj/`):
+
+```
+[ItemRegistry] _static_init     # at script-load…
+[EnemyRegistry] _static_init    #   …both fire BEFORE _ready's first line
+[RR] _ready START
+```
 
 ---
 
@@ -538,6 +566,19 @@ The skeleton is the *default*, not the prescription. Break it when:
 - **Three projects ship the same delta from this skeleton.** That's the
   signal: it's time to update *this file*, not re-derive the same exception on
   every new project.
+
+The one-shot-tool case is the most common break — it collapses the whole
+skeleton to a flat handful of files:
+
+```
+# game-jam entry — no autoloads/, no scripts/{data,systems,nodes} split
+project_root/
+├── project.godot
+├── main.gd          # input + spawn + score, all in one file
+├── player.gd
+├── enemy.gd
+└── assets/
+```
 
 The base anti-overengineering rule applies: three similar lines beats a
 premature abstraction. Don't add containers, autoloads, or managers
