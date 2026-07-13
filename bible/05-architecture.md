@@ -130,6 +130,25 @@ a matching `class_name` collides — Godot errors `Class 'Foo' hides an autoload
 singleton`. So `SoundBus` / `SaveSystem` / `RegistryRoot` are bare `extends Node`,
 accessed by their autoload name (`SaveSystem.write_slot(...)`).
 
+```gdscript
+# Bad — save_system.gd is registered as autoload `SaveSystem` in project.godot AND
+# declares class_name SaveSystem. Parse Error: Class "SaveSystem" hides an autoload
+# singleton — the script won't load, so the autoload never instantiates either.
+class_name SaveSystem
+extends Node
+
+func write_slot(slot: int, data: Dictionary) -> void:
+    _write(slot, data)
+
+# Good — bare `extends Node`, no class_name; reach it by the autoload name. The
+# only change is deleting the class_name line.
+extends Node
+
+func write_slot(slot: int, data: Dictionary) -> void:
+    _write(slot, data)
+# call site:  SaveSystem.write_slot(0, save_data)
+```
+
 **4.8.dev: confirmed, and it's fatal** (`tests/repro_autoload_classname_proj/`).
 A script registered as autoload `Foo` that also declares `class_name Foo` fails to
 parse — exact message `Parse Error: Class "Foo" hides an autoload singleton.` —
