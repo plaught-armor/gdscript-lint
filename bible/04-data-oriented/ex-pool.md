@@ -19,10 +19,11 @@ slots, over and over.
 ```gdscript
 # Naive — allocate + free a Node per shot (P21: churn in the hot path).
 func fire():
-    var b := Bullet.new()        # allocate every shot
-    add_child(b)
+	var b := Bullet.new()        # allocate every shot
+	add_child(b)
+
 func _on_bullet_expired(b):
-    b.queue_free()               # free every death — churn + GC pressure
+	b.queue_free()               # free every death — churn + GC pressure
 ```
 
 At hundreds of shots/second this allocates and frees hundreds of `Node`s/second
@@ -34,7 +35,8 @@ A `ProjectilePool` owns fixed-capacity SoA arrays plus two index lists:
 
 ```gdscript
 const CAP: int = 8
-var _pos: PackedVector2Array = []  ; var _vel: PackedVector2Array = []
+var _pos: PackedVector2Array = []
+var _vel: PackedVector2Array = []
 var _ttl: PackedFloat32Array = []                 # SoA hot state (D4/D5)
 var _free: PackedInt32Array = []                  # stack of unused slot indices
 var _active: PackedInt32Array = []                # dense list of live slots (D8)
