@@ -6,6 +6,13 @@ A spatial hash makes it cost a **constant handful of cells**, independent of N.
 Runnable: [`tests/example_dod_spatial_proj/`](../../tests/example_dod_spatial_proj/),
 verified on 4.8.dev.
 
+> **Shipped as an addon.** This example is the teaching stub — minimal, single
+> file, frozen to match the prose below. The hardened, reusable version lives in
+> its own repo: **[SpatialHash](https://github.com/plaught-armor/SpatialHash)**
+> (`SpatialHash2D` + `SpatialHash3D`, incremental `add`/`move`/`remove`,
+> `query_nearest`, 296-check brute-force harness, 13–55× benchmark). Reach for
+> the addon in real projects; read the stub here to understand the shape.
+
 **In plain terms:** chop the world into a grid of cells, and keep a list of which
 agents are in each cell. To find who's near a point, you only look in the few
 cells around that point — not at every agent in the game.
