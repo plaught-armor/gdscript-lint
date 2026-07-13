@@ -189,7 +189,7 @@ Two non-obvious points:
   `Enemy.AlertState`. There is no global `Enums.gd` god-class. The reason is
   ownership: when you change a label, the change lives next to the code that
   acts on it, not in a file every system has to import. The decision rubric in
-  5f covers the `enum` vs `StringName` choice.
+  5e covers the `enum` vs `StringName` choice.
 
 ---
 
@@ -527,7 +527,7 @@ registry, the crash fires before any gameplay code runs.
 which is exactly what you don't want at boot. `OS.crash` after `push_error` is
 the pair: the error gives you the diagnostic, the crash stops the bleed.
 
-One measured caveat on *when* this fires (full repro in 5da): a registry's
+One measured caveat on *when* this fires (full repro in 5d): a registry's
 `_static_init` validation runs at the **load** of the first boot-loaded script
 that names it, which is **before** `RegistryRoot._ready` executes — not at the
 `_ready` reference statement. So the crash, if a `.tres` is missing, can fire
