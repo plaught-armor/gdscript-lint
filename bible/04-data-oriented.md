@@ -607,7 +607,7 @@ Finite, known dispatch keys → a `Dictionary` lookup keyed by the discriminator
 
 ```gdscript
 # Bad — every (weapon, armor) edits this fn.
-func damage_multiplier(w: int, a: int) -> float:
+func damage_multiplier(w: W, a: A) -> float:
     if w == W.PISTOL and a == A.NONE: return 1.0
     if w == W.PISTOL and a == A.LIGHT: return 0.8
     if w == W.SHOTGUN and a == A.NONE: return 1.5
@@ -618,7 +618,7 @@ const DAMAGE_MULT: Dictionary = {
     W.PISTOL:  {A.NONE: 1.0, A.LIGHT: 0.8, A.HEAVY: 0.5},
     W.SHOTGUN: {A.NONE: 1.5, A.LIGHT: 1.1, A.HEAVY: 0.7},
 }
-func damage_multiplier(w: int, a: int) -> float: return DAMAGE_MULT[w][a]
+func damage_multiplier(w: W, a: A) -> float: return DAMAGE_MULT[w][a]
 ```
 
 What this gets you:
@@ -644,7 +644,7 @@ static var DAMAGE_MULT: Array[PackedFloat32Array] = [
     [1.0, 0.8, 0.5],   # W.PISTOL  → [A.NONE, A.LIGHT, A.HEAVY]
     [1.5, 1.1, 0.7],   # W.SHOTGUN
 ]
-func damage_multiplier(w: int, a: int) -> float: return DAMAGE_MULT[w][a]
+func damage_multiplier(w: W, a: A) -> float: return DAMAGE_MULT[w][a]
 ```
 
 Two constraints, both load-bearing. It can **never be `const`** — a `const`
@@ -875,6 +875,19 @@ Rules of thumb:
   `static`, add the `[autoload]` entry. Callsites unchanged because the
   `class_name` was already a global identifier.
 
+```gdscript
+# Bad — resolves the autoload by tree path every call (~7.8× inline), and routes
+# a stateless helper through a Node that exists only to hold the function.
+func _physics_process(_dt: float) -> void:
+    var dmg: int = get_node(^"/root/CombatBus").compute_damage(hit)
+
+# Good — stateless helper is a static func on a class_name'd RefCounted (~3.3×);
+# a real autoload is reached by its global identifier, never get_node (~4.8×).
+func _physics_process(_dt: float) -> void:
+    var dmg: int = CombatSystem.compute_damage(hit)   # static, cheapest indirection
+    SoundBus.hit_landed.emit(hit)                     # autoload = global ident
+```
+
 ### Signals decouple, they don't speed (P18)
 
 A signal emit is roughly 2× a static call to start, and the cost scales
@@ -894,6 +907,18 @@ Concretely:
 - **Rule of thumb:** if emit-frequency × listener-count exceeds 100/sec on a
   hot path, profile before committing. Otherwise the dispatch cost is below
   the noise floor.
+
+```gdscript
+# Bad — signal emit in _physics_process to one known listener. Decoupling you
+# don't use, paid 2–5× per frame; the Ears ref is already right there.
+func _physics_process(_dt: float) -> void:
+    footstep_made.emit(global_position)      # one listener, every frame
+
+# Good — one known consumer on a hot path is a direct call. Keep signals for the
+# variable-count 1-to-N case (SoundBus fanning out to whatever's listening).
+func _physics_process(_dt: float) -> void:
+    _ears.hear_step(global_position)         # direct, typed, no emit tax
+```
 
 ---
 

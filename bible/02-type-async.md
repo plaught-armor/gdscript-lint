@@ -309,6 +309,21 @@ shallow scripts from leaking into the `ResourceCache`"). The same boot
 validator catches it too; on a ≥ 4.6 target the silent-corruption path itself
 is gone, but the by-design null-default above is not — keep the validator.
 
+```gdscript
+# Bad — trusts the @export to be non-null. An unassigned ItemDef is null; the
+# first field read crashes with "Cannot access property on null instance."
+@export var def: ItemDef
+func _ready() -> void:
+    _stack_max = def.max_stack        # boom if the slot was left empty in the editor
+
+# Good — boot-validate the export once; fail loud at the editor boundary (M10).
+@export var def: ItemDef
+func _ready() -> void:
+    if def == null:
+        push_error("[pickup] def not assigned"); return
+    _stack_max = def.max_stack        # trusted past the guard, no per-use null check
+```
+
 ### H11 — Typed Dict + JSON.parse_string
 
 `JSON.parse_string` returns an untyped `Variant`. Assigning the result to a

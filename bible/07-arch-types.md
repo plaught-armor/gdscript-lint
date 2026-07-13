@@ -210,6 +210,22 @@ single inheritance
 ([forum: inheritance vs composition](https://forum.godotengine.org/t/godot-design-flaw-inheritance-vs-composition/35115))
 — that's the signal to move the shared slice to Axis A (a child node).
 
+```gdscript
+# Good — shared behavior body in a base script; Player/NPC are a genuine is-a.
+class_name Character extends CharacterBody3D
+var health: int = 100
+func take_damage(amt: int) -> void:
+    health -= amt
+
+class_name Player extends Character
+func _physics_process(_dt: float) -> void:
+    _read_input()                    # adds behavior; inherits take_damage
+
+# Bad — "a tank that's both enemy and turret" won't sit in single inheritance.
+# The shared slice belongs in a child node (Axis A), not a second base class.
+class_name Tank extends Enemy        # ...and also needs Turret's aiming? stuck.
+```
+
 ### Axis C — Scene inheritance (`.tscn` inherits `.tscn`)
 
 **In plain terms:** you can also have one whole *scene* inherit from another

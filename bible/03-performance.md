@@ -249,6 +249,21 @@ Measured `bench_loop_idiom.gd`, N = 2,000,000, best-of-7, **Godot 4.8.dev**:
   bug, not a loop-speed one: `var x: Array[int] = range(n)` produces an untyped
   array. That bites assignment, not iteration. → **L3 / C14**.
 
+```gdscript
+# Bad — index-by-counter (L1), and a hand while for the descending pass (L2).
+for i in range(items.size()):
+    _use(items[i])
+var n: int = items.size() - 1
+while n >= 0:
+    _cull(items[n]); n -= 1
+
+# Good — iterate directly (~1.3×), descending range not while (~2.2×); typed for.
+for it: Item in items:
+    _use(it)
+for i: int in range(items.size() - 1, -1, -1):
+    _cull(items[i])
+```
+
 ---
 
 ## 3e. Typed math functions
@@ -269,6 +284,18 @@ Real, ~1.3× in a tight float loop — but the typed variant depends on the argu
 type: `clamp(i, 0, 9)` on ints wants `clampi`, not `clampf`. A purely syntactic
 linter can't always tell, so this is **advisory**. Hard rule in
 `_process`/`_physics_process`/`_draw`. → **P22**.
+
+```gdscript
+# Bad — untyped clamp/abs force Variant dispatch every call in a hot loop.
+func _physics_process(_dt: float) -> void:
+    velocity.x = clamp(velocity.x, -SPEED, SPEED)
+    var d: float = abs(target.x - position.x)
+
+# Good — typed *f variants skip Variant dispatch (~1.3× in a tight float loop).
+func _physics_process(_dt: float) -> void:
+    velocity.x = clampf(velocity.x, -SPEED, SPEED)
+    var d: float = absf(target.x - position.x)
+```
 
 ---
 
