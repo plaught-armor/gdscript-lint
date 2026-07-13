@@ -285,6 +285,8 @@ elif t == TYPE_STRING: ...
 
 Plain param/local subjects need no hoist — compare directly. Don't alias param to local "to be safe"; wasted assignment.
 
+**Nuance — order arms by likelihood.** `if/elif` = linear scan; arm k costs k compares to reach ("6 arms, hit last" row = that linearity priced). Known distribution → lead with most-frequent case: common path exits after one compare, rare arms pay the walk. Not CPU branch prediction (interpreter overhead swamps it) — average compare count. Lever `match` lacks (source-order arms, no frequency tuning). Equally-likely arms → order for readability; win only real when one case dominates.
+
 **When `match` IS still correct:** real pattern matching with no clean `if` equivalent — binding (`var n`), destructuring (`[a, b]`, `{"key": v}`), type patterns, guards (`when`), wildcard-with-binding. There expressiveness = point and perf cost buys something.
 
 **Exhaustiveness objection — moot.** GDScript `match` does *not* enforce exhaustiveness (no compile error on missing arm), so converting value `match` to `if/elif` loses nothing safety-wise. Keep final `else`/default that fails loud (or boot-time validator), exactly as you'd keep `match`'s `_:` arm.

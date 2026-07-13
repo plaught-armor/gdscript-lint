@@ -735,6 +735,35 @@ elif t == TYPE_STRING: ...
 Plain param/local subjects need no hoist — compare directly. Don't alias a
 param to a local "to be safe"; that's a wasted assignment.
 
+**Nuance — order the arms by likelihood.** An `if/elif` chain is a *linear
+scan*: arm k costs k comparisons to reach. The "6 arms, hit last" row above
+(`if/elif` at 0.73× versus an early hit) is exactly that linearity priced in.
+So when you know the distribution, lead with the most-frequent case — it exits
+after one compare and the rare arms pay the long walk, not the common one. This
+isn't CPU branch prediction (interpreter overhead swamps that); it's average
+comparison count, and it's a lever `match` doesn't give you — its arms are
+scanned in source order with no frequency story to tune.
+
+```gdscript
+# Good — hot tag is ~90% NORMAL; lead with it so the common path exits first.
+func resolve(kind: int) -> int:
+    if kind == Tag.NORMAL:   return _normal()     # the common case, one compare
+    elif kind == Tag.CRIT:   return _crit()       # rarer
+    elif kind == Tag.HEAL:   return _heal()
+    else:                    return _unknown(kind) # loud default, cold
+
+# Bad — dispatch order mirrors the enum declaration, so the common NORMAL case
+# pays four compares while a rare arm sits first.
+func resolve(kind: int) -> int:
+    if kind == Tag.UNKNOWN:  return _unknown(kind)
+    elif kind == Tag.HEAL:   return _heal()
+    elif kind == Tag.CRIT:   return _crit()
+    else:                    return _normal()
+```
+
+Where the arms are genuinely equally likely, order for readability instead —
+the win is only real when one case dominates.
+
 **When `match` *is* still correct:** real pattern matching with no clean `if`
 equivalent — binding (`var n`), destructuring (`[a, b]`, `{"k": v}`), type
 patterns, guards (`when`), wildcard-with-binding. There the expressiveness is
