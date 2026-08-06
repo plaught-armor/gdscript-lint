@@ -59,7 +59,7 @@ Myth: groups = flat array scanned with `find`. False. `SceneTree` holds `HashMap
 | `get_first_node_in_group(&"x")` | HashMap lookup | O(1), no alloc |
 | `get_nodes_in_group(&"x")` | HashMap lookup + **fresh `Array` copy** | O(k) + per-call alloc |
 
-Only footgun: `get_nodes_in_group` in hot loop ([proposal #7080](https://github.com/godotengine/godot-proposals/issues/7080)). Per-frame use: cache + refresh on entry/exit edges (signals: `tree.node_added_to_group`, `node_removed_from_group`), or batch behind manager owning own `Array[T]`. Else: groups simplest correct shape, ⊥ replace with Dict-of-IDs "for perf."
+Only footgun: `get_nodes_in_group` in hot loop. **Need only the count → `get_node_count_in_group(group)`** — alloc-free, no `Array` copy ([proposal #7080](https://github.com/godotengine/godot-proposals/issues/7080), closed-completed/implemented; verified 2026-07). Need the members per-frame: cache + refresh on entry/exit edges (signals: `tree.node_added_to_group`, `node_removed_from_group`), or batch behind manager owning own `Array[T]`. Else: groups simplest correct shape, ⊥ replace with Dict-of-IDs "for perf."
 
 Better than `is_in_group` when applicable: `is_in_group(&"player")` → `is Player`. Same O(1), compile-time-checked, no `StringName` hash, no typo, no tag-the-node requirement. Per-member metadata → `Dictionary[int, RecordType]` keyed by `get_instance_id()`. Groups answer "is it in set"; dicts answer "what data does it have."
 
@@ -101,7 +101,7 @@ Worked example (runnable, verified 4.8.dev): `tests/example_dod_membership_proj/
 
 When ref crosses systems / serialized / sits in signal payload / outlives holder's subtree → store `get_instance_id()` (or own assigned ID); resolve via `instance_from_id()` + `is`/validity check at use site.
 
-Why: (1) sidesteps freed-ID-reuse bug ([#32383](https://github.com/godotengine/godot/issues/32383)) — ID lookup returns live object or `null`, never wrong-type live; (2) breaks RefCounted cycles ([#7038](https://github.com/godotengine/godot/issues/7038)); (3) save-friendly; (4) `Dictionary[int, T]` keyed by ID = natural existence-based shape; (5) external indexing without invasive bookkeeping.
+Why: (1) an ID lookup returns the live object or `null`, **never a different object** — an engine *guarantee* in Godot 4 (39-bit validator per ObjectID, verified by source read + measurement — see [engine-bugs.md](engine-bugs.md) C8), not a workaround for the old 3.x reuse report; a raw pointer to a freed object has no such promise; (2) breaks RefCounted cycles ([#7038](https://github.com/godotengine/godot/issues/7038)); (3) save-friendly; (4) `Dictionary[int, T]` keyed by ID = natural existence-based shape; (5) external indexing without invasive bookkeeping.
 
 ```gdscript
 # Bad — live ref; freed-source bug, cycle, won't serialize.
@@ -260,7 +260,7 @@ String-literal returns interned, so dispatch cheap. Boot validate fires on missi
 
 **Bytecode:** `match` arm compiles to ~10 VM opcodes (typeof check + value compare + bool materialize + branch) — carries pattern-matching machinery (destructure, bind, type-test) even when unused. `if/elif` branch = ~2. Interpreted GDScript pays per opcode → value `match` ≈ 5× dispatch overhead of equivalent `if` chain.
 
-> **Footnote ([#120660](https://github.com/godotengine/godot/pull/120660), 4.x):** compound `if` conditions got *cheaper still*. Pre-fix, `if a and b` materialized each operand's result into temp before branching; PR branches directly off short-circuit → ~30-35% faster for single `and`/`or`, bytecode up to 79% smaller, each extra operator costs 3 addresses not 14. **Does not change `if/elif` vs `match` verdict** — arms here = single compares (`if x == A`), unaffected. Only sharpens model: where arm *does* carry compound guard (`if x == A and y > 0`), `if/elif`'s lead over `match` widens, since `match`'s `when` guard sees no such optimization. One more reason value dispatch stays in `if/elif`.
+> **Footnote — proposed, not shipped ([#120660](https://github.com/godotengine/godot/pull/120660), open PR, verified 2026-07):** would make compound `if` conditions *cheaper still*. Today `if a and b` materializes each operand's result into temp before branching; PR would branch directly off short-circuit → claimed ~30-35% faster for single `and`/`or`, bytecode up to 79% smaller, each extra operator costing 3 addresses not 14. **Unmerged — no shipped Godot has this. Don't tune against it.** **Does not change `if/elif` vs `match` verdict** — arms here = single compares (`if x == A`), unaffected. Only sharpens model: where arm *does* carry compound guard (`if x == A and y > 0`), `if/elif`'s lead over `match` widens, since `match`'s `when` guard sees no such optimization. One more reason value dispatch stays in `if/elif`.
 
 **Measured** (`bench_dispatch_mechanism.gd`, 600k rows, best-of-7, median of 5 runs, all surrounding work held identical, vs `Array[Callable]` index baseline = 1.00×; absolute ratios drift ±~20% build-to-build, ordering = durable finding):
 
