@@ -148,6 +148,43 @@ Findings:
   indexer (baloo) churning the freshly-built binary — best-of-7 + median-of-5
   discards it; if you reproduce, run on a quiet machine.
 
+## `elif` vs bare-`if` chain when every arm returns (bench_ifchain_vs_ifelif.gd)
+
+Backs the D7b nuance. Separate question from `match` vs `if/elif` (~5×, above):
+given you already have an `if/elif` chain whose every arm exits via `return`, is
+the `elif` keyword costing anything? The theory that motivated the test: an
+`elif`'s trailing jump-to-end is dead code once the arm returns, so a bare-`if`
+chain should compile smaller and run at least as fast — which would make a
+mechanical `elif` → `if` sweep worth doing.
+
+```bash
+godot --headless --script tests/bench_ifchain_vs_ifelif.gd
+```
+
+N=1M, best-of-7, 6 arms, each doing a little work before returning. Two hit
+profiles (always arm 0 / always the last arm) × two call paths (direct call,
+`Callable.call`). Delta = bare-`if` vs `if/elif`; negative = bare-`if` faster.
+
+| profile | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| EARLY, direct | -0.5% | +0.2% | -1.1% |
+| LATE, direct | +1.2% | +0.5% | -0.7% |
+| EARLY, `Callable` | -0.2% | +0.5% | -0.5% |
+| LATE, `Callable` | +0.0% | +0.5% | -0.5% |
+
+**Verdict: wash — claim refuted.** Every cell is inside run-to-run noise, and
+the sign flips between runs. The dead trailing jump either isn't emitted or
+costs nothing measurable next to the compare-and-branch the arm pays anyway.
+Both hit profiles agree, so it isn't hiding at one arm depth. Honest bound: a
+±1.2% noise floor can't *exclude* a real sub-1% effect — it only shows there
+isn't one big enough to act on, which is the same answer for our purposes.
+
+Consequence: **no `elif` → `if` sweep, and no lint rule.** There is nothing to
+flag — the two forms are equivalent, so the choice is readability. Recorded so
+the idea doesn't get re-derived and re-measured a third time. The real dispatch
+lever in this area is unchanged: value-only `match` → `if/elif` (~5×, D7b), and
+inlining the arm body (~2.1×).
+
 ## Static typing, groups, convention dispatch, autoload
 
 Backs the remaining measurable perf claims across Parts II–IV. All Godot 4.8.dev,
