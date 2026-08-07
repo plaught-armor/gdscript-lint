@@ -9,9 +9,33 @@ setup — these are examples, not a turnkey install.
 
 | Hook | Event | What it does |
 |---|---|---|
-| `gd-check.sh` | `PostToolUse` (`Edit\|Write`) | On a `.gd` write: `gdscript-formatter --check` + `lint`, then `gd-lint.py`. Blocks the edit (`decision:block`) on a blocking finding; advisory findings ride along as a non-blocking note. Fails open if a tool is missing. |
+| `gd-check.sh` | `PostToolUse` (`Edit\|Write`) | On a `.gd` write: `gdscript-formatter --check` + `lint`, then `gd-lint.py`. Blocks the edit (`decision:block`) on a blocking finding; advisory findings ride along as a non-blocking note. **Diff-aware** — see below. Fails open if a tool is missing or the formatter panics. |
 | `gd-analyze-stop.sh` | `Stop` | Runs `godot --check-only` on `.gd` changed this session, inside the file's Godot project, and blocks on type/parse errors the linter can't see. Content-hash deduped, fails open. |
 | `gd-review-stop.sh` | `Stop` | Optional. Runs an LLM reviewer (`claude -p`) over changed `.gd`, hard-blocks on CRITICAL findings, advises on the rest. Needs the `claude` CLI. |
+
+## Diff-awareness (`gd-check.sh`)
+
+You own what you touch. For a file already tracked at `HEAD`, findings are
+filtered to the lines this edit actually changed (working tree vs `HEAD`) —
+pre-existing violations on untouched lines don't block. Formatting is judged the
+same way: it only fails when the file is unformatted *now* and was formatted at
+`HEAD`, so an already-dirty file is grandfathered instead of demanding a
+whole-file reformat to land a one-line fix.
+
+Full enforcement still applies to new / untracked files, and to every file when
+the directory isn't a git repo or the repo has no commits yet. Keep a full-file
+run (CI, or `gd-lint.py` over the tree) as the authoritative gate — this hook is
+the fast edit-time layer, not the whole story.
+
+**Project-local lint exceptions.** `gdscript-formatter` has no config file, so
+the hook reads one: `.claude/gdscript-formatter-disable` at the repo root, one
+rule name per line (`#` comments allowed). Use it for rules that clash with a
+deliberate, documented convention of that codebase (protocol-mirrored names,
+codegen-emitted identifiers, a `_`-prefix privacy convention). `max-line-length`
+is always disabled — `--check` already enforces style-guide wrapping, and what's
+left is usually an unwrappable string or `res://` path. `private-access` is
+additionally disabled under `tests/`, where white-box tests legitimately reach
+internals.
 
 ## Setup
 
