@@ -53,7 +53,7 @@ Five smells, one per rule it's about to break:
   `health`/`position`) — repeated on every instance (**D5**).
 - **A `_dead` flag** that has to be kept in sync with reality (**D2**).
 - **A live `_attacker` Node ref** that dangles if the attacker frees first
-  (**D3**, Part I **C8**).
+  (**D3**, Part I **1c**).
 - **An armor `if/elif` chain** that grows every time a designer adds armor
   (**D7**).
 - **N self-ticking `_physics_process` callbacks**, each paying per-node dispatch

@@ -72,10 +72,11 @@ trip into a managed language — three of them not about speed at all.
 depend on scale, profiling, or the interpreter — DOD eliminates whole *bug
 classes* by construction. Existence-based processing (**D2**) makes state
 membership in a container, not a flag on every object: no flag to desync from
-reality, because the flag *is* reality. Reference by integer ID (**D3**) returns
-a live object or `null`, never a wrong-type live one — the freed-id-reuse crash
-([#32383](https://github.com/godotengine/godot/issues/32383), Part I **C8**)
-can't happen. Pure transforms (**D6**) test with two plain objects and no
+reality, because the flag *is* reality. Reference by integer ID (**D3**) turns a
+dangling reference into a `null` you have to handle at the use site, and the
+engine's own validator means that `null` is the *only* other answer — the id
+never resolves to whatever object took the freed one's slot (Part I **1c**).
+Pure transforms (**D6**) test with two plain objects and no
 SceneTree. A turn-based card game with nine entities gets every one of these.
 DOD is correct-by-construction *before* it is fast — lead with this, it's the
 claim with no counter-benchmark.
@@ -440,11 +441,15 @@ func _retaliate() -> void:
 
 Five things this buys:
 
-1. **Sidesteps the freed-ID-reuse bug**
-   ([#32383](https://github.com/godotengine/godot/issues/32383)). With a live
-   ref, Godot can recycle the slot to a different object and your "still
-   valid" check passes against the wrong instance. `instance_from_id` returns
-   the live object *or* `null` — never a wrong-type live object.
+1. **Liveness is answered by the engine, not by your bookkeeping.**
+   `instance_from_id` returns the live object *or* `null` — a **guarantee** in
+   Godot 4, not a workaround: an `ObjectID` carries a 39-bit monotonic validator
+   beside its 24-bit slot, so a freed id never resolves to whatever took its slot
+   (Part I **1c**, measured; the old freed-id-reuse report
+   [#32383](https://github.com/godotengine/godot/issues/32383) is 3.x-era). A raw
+   ref carries no such promise — you're left checking `is_instance_valid` at every
+   use, and a stale one that *is* still valid tells you nothing about whether it's
+   still the right object for this system.
 2. **Breaks RefCounted cycles**
    ([#7038](https://github.com/godotengine/godot/issues/7038)). Two RefCounteds
    pointing at each other leak silently. IDs are integers; integers don't form

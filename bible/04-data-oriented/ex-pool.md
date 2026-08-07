@@ -169,12 +169,15 @@ This example returns `-1` (silent drop). That's one of four
 ### Stale-handle safety: generational indices
 
 A raw slot index has the **ABA problem**: hold index 5 (Alice), Alice expires,
-Bob reuses slot 5 — your index now silently points at Bob. (Same class as Godot's
-own `instance_from_id` reuse, [#32383](https://github.com/godotengine/godot/issues/32383),
-this corpus's D3/C8.) For handles that **outlive** their referent (an AI target, a
-saved reference), pack a **generation** alongside the index: a 64-bit handle =
-`index | (generation << 32)`, a `PackedInt64Array` of per-slot generations bumped
-on free, and an `is_valid(handle)` check at every read
+Bob reuses slot 5 — your index now silently points at Bob. This is exactly the
+hazard Godot's own `ObjectID` does **not** have, and for a reason worth copying:
+an id is `[validator | slot]`, and while the slot recycles, the 39-bit validator
+is a global monotonic counter, so a stale id fails the compare and resolves to
+`null` (Part I **1c**). A bare pool index is an ObjectID with the validator
+deleted. For handles that **outlive** their referent (an AI target, a
+saved reference), put it back: pack a **generation** alongside the index — a
+64-bit handle = `index | (generation << 32)`, a `PackedInt64Array` of per-slot
+generations bumped on free, and an `is_valid(handle)` check at every read
 ([generational indices](https://www.studyplan.dev/structure-of-arrays/generational-indices)).
 For one-frame transient refs (our example), skip it — the overhead exceeds the
 bug surface.

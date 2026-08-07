@@ -427,7 +427,8 @@ if attacker == null:         return   # optional Object ref: explicit reads as i
   [#59816](https://github.com/godotengine/godot/issues/59816) — on ≤4.3 both `not`
   and `== null` lied about a freed Node; fixed 4.4). For a node that may be freed
   out from under you, `is_instance_valid(x)` is the belt-and-suspenders check
-  (Part I, C5/C8).
+  (Part I, C5). It answers liveness completely — a freed ref never comes back as
+  a *different* live object (Part I, 1c).
 - **`if not x` is correct** only when null *and* 0 *and* empty *and* false all
   genuinely mean "absent" — then it's the concise, right form.
 

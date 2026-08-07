@@ -8,6 +8,8 @@ extends SceneTree
 ## Run: godot --headless --script tests/repro_lifecycle.gd
 
 const CYCLES: int = 2000
+const REUSE_CYCLES: int = 200_000
+const OBJECTDB_SLOT_MASK: int = (1 << 24) - 1
 
 
 class RC extends RefCounted:
@@ -82,6 +84,47 @@ func _c8() -> void:
 	var resolved: Object = instance_from_id(id)
 	# Safe behavior: lookup of a freed id returns null (the validity-check pattern).
 	_note("C8", "CONFIRMED" if resolved == null else "CHANGED", "instance_from_id(freed)=%s (want <null>)" % str(resolved))
+	_c8_reuse()
+
+
+func _c8_reuse() -> void:
+	# Hammer one ObjectDB slot: alloc and free in lockstep, so the slot just
+	# freed is the head of the free list on the next allocation. The 24-bit slot
+	# index recycles every iteration; the 39-bit validator is a global monotonic
+	# counter, so the composed id must never repeat and a freed id must never
+	# resolve to the live object that took its slot.
+	var seen_ids: Dictionary[int, bool] = {}
+	var slots: Dictionary[int, bool] = {}
+	var id_collisions: int = 0
+	var stale_resolves: int = 0
+	var reuse_hits: int = 0
+	var stale_id: int = 0
+	for i: int in REUSE_CYCLES:
+		var n: Node = Node.new()
+		var id: int = n.get_instance_id()
+		if seen_ids.has(id):
+			id_collisions += 1
+		seen_ids[id] = true
+		slots[id & OBJECTDB_SLOT_MASK] = true
+		if stale_id != 0 and (id & OBJECTDB_SLOT_MASK) == (stale_id & OBJECTDB_SLOT_MASK):
+			# This allocation took the slot the previous free released — the only
+			# iteration where probing the freed id can expose a wrong-body resolve.
+			reuse_hits += 1
+			if instance_from_id(stale_id) != null:
+				stale_resolves += 1
+		stale_id = id
+		n.free()
+	# reuse_hits > 0 is part of the verdict: without it the run could pass by never
+	# recycling a slot, which measures nothing (the _c8 single-free case already does).
+	var ok: bool = id_collisions == 0 and stale_resolves == 0 and reuse_hits > 0
+	_note(
+		"C8-reuse",
+		"CONFIRMED" if ok else "CHANGED",
+		(
+			"%d cycles over %d distinct slot(s), %d slot reuses: %d id collisions, %d stale ids resolved (want reuses > 0, then 0 / 0)"
+			% [REUSE_CYCLES, slots.size(), reuse_hits, id_collisions, stale_resolves]
+		)
+	)
 
 
 func _h8() -> void:

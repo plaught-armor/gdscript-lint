@@ -12,8 +12,10 @@ Draws from [`../rules/engine-bugs.md`](../rules/engine-bugs.md).
 > The engine moves: re-running the repros found that **C1, C2, and the `.filter()`
 > half of C3 no longer reproduce on 4.8.dev**, while C3's `.map()` half, C7, C14,
 > and C17 are still live (C17 now as a silent partial-load rather than a hang).
-> The lifecycle entries C5, C8, C10, H8, and M9 were re-run and behave as their
-> status claims on 4.8.dev; C6's crash is gone but the coroutine is now silently
+> The lifecycle entries C5, C10, H8, and M9 were re-run and behave as their
+> status claims on 4.8.dev; **C8 was retracted outright** — freed-id reuse is a
+> 3.x-era report that the 4.x validator scheme makes unreachable (1c);
+> C6's crash is gone but the coroutine is now silently
 > *dropped* rather than resumed (see its entry). Of the previously-unverified tail:
 > C4 resolves to **invariant** typed arrays (covariant assignment is a compile
 > error), C13 (unparented `Node.new()` leak) is **confirmed**, and H12 is
@@ -92,8 +94,8 @@ the object is still alive right after the `await`.
 **Symptom.** Awaiting a signal on a Node that gets freed before the signal
 fires either leaks the coroutine frame or crashes the resume site. After
 *any* `await` involving a Node, the Node reference may point at a freed
-object — or, worse, at a *different* object that reused the instance id
-(see C8).
+object. (It will never point at a *different* live object — see 1c: instance
+ids are not recycled in Godot 4.)
 
 **Repro.**
 
@@ -115,8 +117,10 @@ func chase(target: Node) -> void:
     target.take_damage(10)
 ```
 
-Belt-and-suspenders: check type too (`if target is Enemy`), because instance
-id reuse may resolve to a live object of a different class (C8).
+If the target arrives from outside your own subtree (a signal payload, a
+raycast collider, an id you resolved), narrow the type too (`if target is
+Enemy`) — not because the id could be recycled (it can't, see 1c) but because
+nothing proved what *kind* of object that seam hands you.
 
 **Issue / status.** [#72629](https://github.com/godotengine/godot/issues/72629).
 **By design** — the validity check is the prescribed pattern. **Confirmed on Godot
@@ -127,38 +131,54 @@ flag: **C5**.
 
 ---
 
-## 1c. Freed-object instance-id reuse
+## 1c. Freed-object instance-id reuse — does NOT happen in Godot 4
 
-**In plain terms:** every object gets a numeric tag. When you delete an object
-the engine can hand that same tag to a *different* new object. If you held the
-old reference, you might end up calling methods on a stranger — and the usual
-"is this null?" check tells you everything is fine. The fix is to store the
-tag (the integer ID), then re-look-it-up at the moment you actually use it,
-and check the type too.
+> **Retracted 2026-08-06.** Earlier revisions of this chapter taught that a
+> freed object's instance id could be handed to a different object, so a stale
+> id might resolve to a live stranger. That is a Godot 3.x-era report
+> ([#32383](https://github.com/godotengine/godot/issues/32383)) and it does not
+> describe Godot 4. Source read plus measurement below. Reference-by-ID (**D3**)
+> is unaffected — it keeps every other benefit, and is now backed by an engine
+> guarantee instead of working around a bug.
 
-**Symptom.** Storing a `Node` reference, freeing the Node, then later
-resolving the reference yields a *different live object* that recycled the
-same instance id. Truthiness and `== null` will tell you the ref is "alive";
-a method call dispatches to the wrong object.
+**In plain terms:** every object gets a numeric tag. Deleting the object frees
+its *slot*, and the next object can take that slot — but the tag also carries a
+counter that never repeats, so the whole tag is never handed out twice. Look up
+a deleted tag and you get nothing back, never a stranger.
 
-**Repro.**
+**What the engine does.** An `ObjectID` is
+`[1 reference bit | 39-bit validator | 24-bit slot]` (`core/object/object.h`,
+the `OBJECTDB_*_BITS` defines). `ObjectDB::add_instance` bumps a **global
+monotonic** `validator_counter` on every allocation and stamps it into the slot;
+`ObjectDB::get_instance` compares the id's validator against the slot's and
+returns `nullptr` on mismatch. The 24-bit slot recycles freely; the 39-bit
+validator does not. Reusing a whole id therefore needs the counter to wrap
+**and** the same slot to come back — 2^39-1 ≈ 5.5e11 allocations, about 6.4 days
+at an absurd 1M objects/sec.
 
-```gdscript
-# Repro — freed-object id reuse resolves a stale ref to the wrong object.
-var _attacker: Node = null
+**Measured** (`tests/repro_lifecycle.gd` → `C8-reuse`, 4.8.dev): 200,000
+alloc/free cycles in lockstep, so every allocation takes the slot the previous
+free just released — **1 distinct slot, 0 id collisions, 0 stale ids that
+resolved to anything**. The freed id resolves to `null` every time.
 
-func remember(src: Node) -> void:
-    _attacker = src
+**What this changes at the call site.**
 
-func retaliate() -> void:
-    # `_attacker` may now be a different Node entirely.
-    if _attacker:
-        _attacker.take_damage(5)   # wrong target
-```
+- A **null check is sufficient for liveness.** `instance_from_id(stale)` returns
+  `null`, never a different live object.
+- **Don't** write per-tick `weakref`, a parallel `RID`, or "right id, wrong
+  body" guards to defend against recycling. They defend against nothing.
+- **The type test still earns its keep** — for an unrelated reason. An id may
+  legitimately name a live object of a *different kind* than this call site
+  wants (a `resolve()` that narrows to one class, next to a `resolve_any()` that
+  accepts several). Narrow because the id's *type* is unproven at this seam, not
+  because the id might be recycled.
+- **Reference-by-ID (D3) still stands** on its other legs: it breaks RefCounted
+  cycles (C7), serializes, gives `Dictionary[int, T]` existence-based tables, and
+  indexes externally without invasive bookkeeping.
 
-**Fix.** When a reference crosses systems, sits in a signal payload, gets
-serialized, or outlives the holder's subtree, store the *integer id* and
-re-resolve at use site with a type check:
+**Shape (unchanged — the rationale moved, not the code).** When a reference
+crosses systems, sits in a signal payload, gets serialized, or outlives the
+holder's subtree, store the *integer id* and re-resolve at use site:
 
 ```gdscript
 var _attacker_id: int = 0
@@ -176,8 +196,11 @@ This is the same shape as DOD rule **D3** — reference by ID, resolve at use
 site. Sibling refs inside one scene tree can still be direct typed refs;
 this rule is about refs that *escape* a subtree's lifecycle.
 
-**Issue / status.** [#32383](https://github.com/godotengine/godot/issues/32383).
-**By design** — id reuse is part of the object lifecycle. Lint flag: **C8**.
+**Issue / status.** [#32383](https://github.com/godotengine/godot/issues/32383)
+is a **3.x-era report**; the 4.x validator scheme makes whole-id reuse
+arithmetically unreachable. Nothing to work around. **C8 is retired as a bug
+flag** — it survives in this corpus only as the entry explaining why the defense
+is unnecessary. gd-lint never carried it.
 
 ---
 
@@ -220,7 +243,8 @@ func link(a: Node_, b: Node_) -> void:
    ```
 
 2. **Entity IDs** — store `get_instance_id()` on one side, resolve at use
-   site. Same shape as C8. See [`../rules/dod.md`](../rules/dod.md) D3.
+   site — an int can't hold a referent alive. Same shape as 1c. See
+   [`../rules/dod.md`](../rules/dod.md) D3.
 
 **Issue / status.** [#7038](https://github.com/godotengine/godot/issues/7038).
 **Live — confirmed on Godot 4.8.dev.** Creating 2000 mutually-referencing
@@ -446,7 +470,7 @@ These reproduced on an older Godot but are fixed in the version noted. Keep the
 workaround only if your project's minimum predates the fix; otherwise drop it.
 The full re-test verdicts are in the version-status table below.
 
-- **C1** — `const Packed*Array` reported byte-count size and read 0.0. [#88753](https://github.com/godotengine/godot/issues/88753). **Not reproduced on 4.8.dev** (size correct; the nested-constructor form is now a parse error). Use `var`/`static var`, never `const`, if your min Godot predates the fix; the S6b style point — init a `Packed*Array` with a bare literal, not a constructor wrapper — holds regardless.
+- **C1** — `const Packed*Array` reported byte-count size and read 0.0. [#88753](https://github.com/godotengine/godot/issues/88753). **Not reproduced on 4.8.dev** (size correct; the nested-constructor form is now a parse error). Use `var`/`static var`, never `const`, if your min Godot predates the fix; the S6b style point — init a `Packed*Array` with a bare literal, not a constructor wrapper — holds regardless. On an `@export` field that same wrapper is **S6c**, a data-loss bug rather than a style nit: it reads back null in the inspector and persists empty on save/reimport ([#106965](https://github.com/godotengine/godot/issues/106965)).
 - **C2** — `const` `Array`/`Dictionary` was a shared mutable reference. [#61274](https://github.com/godotengine/godot/issues/61274). **Fixed on 4.8.dev** — a `const` container is now read-only; mutating it raises instead of silently corrupting the shared store. Discipline unchanged: never mutate a `const` container, `.duplicate()` first. (For class-shared `static var` tables the `.make_read_only()` lock — C2a above — is the live enforcement.)
 - **C4** — `Array[Base]` covariance under `Array[Derived]` assignment.
   [#83876](https://github.com/godotengine/godot/issues/83876). *4.8.dev: typed
@@ -495,7 +519,7 @@ disagree, trust the empirical column **for that build only**.
 | C5 | `await` on freed object | [#72629](https://github.com/godotengine/godot/issues/72629) | **By design** — validity check is the pattern | **Confirmed** — `is_instance_valid` false after await; guard works |
 | C6 | coroutine after `queue_free` | [#93608](https://github.com/godotengine/godot/issues/93608) | **Fixed ~4.7** | No crash, but coroutine **silently dropped** (does not resume to completion) |
 | C7 | `RefCounted` circular leak | [#7038](https://github.com/godotengine/godot/issues/7038) | **Live** | **Live** — leaked ~4000 objs / 2000 cycles |
-| C8 | freed-id reuse | [#32383](https://github.com/godotengine/godot/issues/32383) | **By design** — validity + type check | **Confirmed** — `instance_from_id(freed)` → null |
+| C8 | freed-id reuse | [#32383](https://github.com/godotengine/godot/issues/32383) | **Retired** — 3.x-era report, never applicable to 4.x | **Cannot happen** — 200k lockstep alloc/free on 1 slot: 0 id collisions, freed id → null |
 | C10 | `super()` in `_init` | [#76938](https://github.com/godotengine/godot/issues/76938) | **Fixed 4.2** | **Confirmed fixed** — `super()` runs base ctor |
 | C11 | `sort_custom` strict `<` | [#58878](https://github.com/godotengine/godot/issues/58878) | **Live** | Not stable by contract (this input held order) |
 | C12 | `assert()` stripped in release | — | **By design** | **Confirmed** — assert body runs in debug, stripped in release (ran=false) |

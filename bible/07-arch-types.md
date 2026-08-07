@@ -528,7 +528,11 @@ server every frame** ("calling functions returning values… will stall them and
 force them to process anything pending" — async pipeline)
 ([using_servers](https://docs.godotengine.org/en/stable/tutorials/performance/using_servers.html));
 and **RIDs are not GC-tracked — you must free them yourself** or leak (same).
-That's Part I's resource-discipline rules (C5/C7/C8/C13) one layer lower.
+That's Part I's resource-discipline rules (C5/C7/C13) one layer lower. An `RID`
+is validator-tagged like an `ObjectID` (`rid_owner.h`: a 31-bit monotonic
+validator over the 32-bit slot, so a stale handle fails the compare), but unlike
+an `Object` nothing refcounts it for you — the leak, not a mistaken identity, is
+what bites.
 
 **The takeaway the sources converge on:** *profile your bottleneck, not your
 entity count.* The thresholds above span two orders of magnitude depending on
