@@ -49,10 +49,29 @@ _find_project() {
   return 1
 }
 
+# True if any dir between the file and the project root holds a .gdignore.
+# Godot skips such dirs entirely (no import, no class_name registration), so a
+# per-file --check-only there can never resolve sibling class_name types and
+# will emit guaranteed-false "Could not find type" errors (e.g. golden/fixture
+# output committed as reference text). Honor the same ignore the engine does.
+_gdignored() {
+  local dir; dir="$(cd "$(dirname "$1")" && pwd -P)"
+  local stop="$2"
+  local guard=0
+  while [ "$dir" != "/" ] && [ "$guard" -lt 40 ]; do
+    [ -f "$dir/.gdignore" ] && return 0
+    [ "$dir" = "$stop" ] && break
+    dir="$(dirname "$dir")"
+    guard=$((guard + 1))
+  done
+  return 1
+}
+
 errors=""
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   proj="$(_find_project "$root/$f")" || continue        # not in a Godot project
+  _gdignored "$root/$f" "$proj" && continue             # dir Godot itself skips
   abs="$(cd "$(dirname "$root/$f")" && pwd -P)/$(basename "$f")"
   rel="res://${abs#"$proj"/}"
   out="$("$GODOT_BIN" --headless --path "$proj" --check-only --script "$rel" 2>&1)"
