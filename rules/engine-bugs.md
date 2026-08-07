@@ -2,28 +2,31 @@
 
 Crash, leak, or silently corrupt. Each links Godot issue where one exists.
 
-**Version status (verified 2026-06):** still live in current Godot — C1 (#88753), C2 (#61274, partial — packed/nested still share), C3 (#72566), C5/C7 (by-design, validity-check = prescribed pattern), C11 (#58878), C14 (#72627, dup #110659), C15 (#116947, dup of #88753), C16 (#87629). **Fixed in known version** (historical below project min Godot): C6 (#93608, ~4.7), C10 (#76938, **4.2**), H8 freed-Node truthiness (#59816, **4.4**), H12 `@export` silent-null — *assigned* Resource loading null under preload/cyclic-script (#110394, fixed **4.6** by #109345); note the unassigned-`@export`-Resource null is by-design + permanent, keep the boot validator, M9 `duplicate(true)` gap (#74918, **4.5** via `duplicate_deep()`), P9 Lua-dict perf (#68834, **4.4**). **Uncertain** — re-test on target before removing: C4 covariance (#83876, closed-completed, no fix PR linked). **Retired as never-applicable to 4.x**: C8 freed-id reuse — the validator scheme makes it arithmetically impossible; see its entry below for the source read and the measurement. Keep every warning your project min Godot predates.
+**Version status (tracker verified 2026-06; empirical column = 4.8.dev, `tests/repro_*`, full table in [`bible/01-engine-bugs.md`](../bible/01-engine-bugs.md)):** still live, tracker **and** measured — C5/C7 (by-design, validity-check = prescribed pattern), C11 (#58878), C14 (#72627, dup #110659), C16 (#87629), C17. **Tracker open but NOT reproduced on 4.8.dev** — treat as fixed above that build, keep the workaround only if your min Godot is older: C1 (#88753, size correct now; nested-ctor form is a parse error), C2 (#61274, `const` container is read-only — mutation raises), C3 (#72566, **split**: `.filter()` returns typed, `.map()` still untyped). **Fixed in known version** (historical below project min Godot): C6 (#93608, ~4.7), C10 (#76938, **4.2**), H8 freed-Node truthiness (#59816, **4.4**), H12 `@export` silent-null — *assigned* Resource loading null under preload/cyclic-script (#110394, fixed **4.6** by #109345); note the unassigned-`@export`-Resource null is by-design + permanent, keep the boot validator, M9 `duplicate(true)` gap (#74918, **4.5** via `duplicate_deep()`), P9 Lua-dict perf (#68834, **4.4**). **Uncertain** — re-test on target before removing: C4 covariance (#83876, closed-completed, no fix PR linked), C15 typed Dict + `Packed*` (#116947, dup of #88753 — not re-run; C1 not reproducing suggests re-checking). **Retired as never-applicable to 4.x**: C8 freed-id reuse — the validator scheme makes it arithmetically impossible; see its entry below for the source read and the measurement. Keep every warning your project min Godot predates.
 
-**`const` packed arrays broken** ([#88753](https://github.com/godotengine/godot/issues/88753), C1) — `const Array[PackedFloat32Array]` reports byte-count size, reads 0.0. Never `const`. Default `var` (instance); use `static var` **only** when table read from outside declaring class — single-class private "constant" stays plain `var`, not `static var`. Literal needs no constructor wrapper — typed annotation does conversion: `var x: PackedInt32Array = [1, 2, 3]` (or `= []` when empty), never `PackedInt32Array([1, 2, 3])` / `PackedInt32Array()`. On plain field wrapper merely redundant; on **`@export`** field = correctness/data-loss trap — constructor-from-literal form displays null in inspector ([#106965](https://github.com/godotengine/godot/issues/106965), 4.5dev4), save/reimport from null state persists empty, silently losing authored data. Fix = **not** downgrade type to `Array[int]` (costs S6 packed-array win) — drop constructor wrapper, use bare-literal init. Flagged S6b. Holds for every `Packed*Array` (`PackedByteArray`/`PackedInt32Array`/`PackedFloat32Array`/`PackedStringArray`/`PackedVector2Array`/`PackedVector3Array`/`PackedColorArray`).
+**`const` packed arrays broken** ([#88753](https://github.com/godotengine/godot/issues/88753), C1) — `const Array[PackedFloat32Array]` reports byte-count size, reads 0.0 (not reproduced on 4.8.dev; keep the rule below your min Godot). Never `const`. Default `var` (instance); use `static var` **only** when table read from outside declaring class — single-class private "constant" stays plain `var`, not `static var`. Literal needs no constructor wrapper — typed annotation does conversion: `var x: PackedInt32Array = [1, 2, 3]` (or `= []` when empty), never `PackedInt32Array([1, 2, 3])` / `PackedInt32Array()`. On plain field wrapper merely redundant; on **`@export`** field = correctness/data-loss trap — constructor-from-literal form displays null in inspector ([#106965](https://github.com/godotengine/godot/issues/106965), 4.5dev4), save/reimport from null state persists empty, silently losing authored data. Fix = **not** downgrade type to `Array[int]` (costs S6 packed-array win) — drop constructor wrapper, use bare-literal init. Flagged **S6c** (`@export`, data loss); plain-field redundancy = S6b. Holds for every `Packed*Array` (`PackedByteArray`/`PackedInt32Array`/`PackedFloat32Array`/`PackedStringArray`/`PackedVector2Array`/`PackedVector3Array`/`PackedColorArray`).
 
-**`const` arrays/dicts = shared mutable refs** ([#61274](https://github.com/godotengine/godot/issues/61274), C2) — `const MY_ARR = [1,2,3]` mutates globally. Never mutate; `.duplicate()` first.
+**`const` arrays/dicts = shared mutable refs** ([#61274](https://github.com/godotengine/godot/issues/61274), C2) — `const MY_ARR = [1,2,3]` mutates globally. 4.8.dev: `const` container is read-only, so the mutation now **raises** instead of silently corrupting the shared store. Discipline unchanged — never mutate; `.duplicate()` first.
 
 **Lock class-shared containers with `.make_read_only()`** (C2a) — `static var` admits shared-mutability bug above; `.make_read_only()` enforces. Mutations raise "Array is in read-only state"; reads work; idempotent (`.is_read_only()` to guard).
 
 ```gdscript
+class_name ItemRegistry extends RefCounted
+
 static var ALL: Array[ItemDef] = [null, preload("..."), ...]
-func _ready() -> void:
+
+static func _static_init() -> void:
     _validate()
     if not ALL.is_read_only(): ALL.make_read_only()
 ```
 
 Limit: shallow. Nested `Array`/`Dictionary` need own freeze. `Resource` has no freeze API (`Object.set_read_only` unimplemented) → `ALL[1].max_stack = 99` still mutates singleton preload. At Resource-instance layer, immutability convention-only — code-review concern, no engine enforcement.
 
-**Typed `.filter()`/`.map()` return untyped Array** ([#72566](https://github.com/godotengine/godot/issues/72566), C3) — must `assign()`:
+**Typed `.map()` returns untyped Array** ([#72566](https://github.com/godotengine/godot/issues/72566), C3) — must `assign()`. 4.8.dev: `.filter()` half is **fixed** (returns typed); `.map()` still untyped, so keep `assign()` there:
 
 ```gdscript
-var result: Array[BattlePawn] = []
-result.assign(queue.filter(func(p): return is_instance_valid(p)))
+var names: Array[String] = []
+names.assign(queue.map(func(p: BattlePawn) -> String: return p.display_name))
 ```
 
 **`await` on freed object leaks/crashes** ([#72629](https://github.com/godotengine/godot/issues/72629), C5) — `is_instance_valid()` after any `await` involving node.

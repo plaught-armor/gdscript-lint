@@ -291,7 +291,7 @@ Plain param/local subjects need no hoist — compare directly. Don't alias param
 
 **Exhaustiveness objection — moot.** GDScript `match` does *not* enforce exhaustiveness (no compile error on missing arm), so converting value `match` to `if/elif` loses nothing safety-wise. Keep final `else`/default that fails loud (or boot-time validator), exactly as you'd keep `match`'s `_:` arm.
 
-## D8 — Batched homogeneous processing > per-Node tick
+## D8 — Batched homogeneous processing: win is doing less, not cheaper dispatch
 
 **Measured correction (4.8.dev, `bench_process_centralization_proj/`):** manager looping nodes and calling `e.tick()` per entity = **~2× SLOWER** than per-node `_physics_process` — GDScript method call (D9 ~4.3× tier) costs more than engine's native callback, and loop adds array overhead. Centralizing *call* = loss, not win. Dispatch win exists **only for inline SoA**: manager owning `Packed*Array`s and working them in flat loop with **no per-entity calls** (~2.3× faster at light work, tapering to parity as work grows). "One vs a few" managers: no difference.
 
@@ -350,7 +350,7 @@ Most dispatch cost invisible vs frame budget. Matters only in measured hot loops
 | 7 | `Packed*Array` over `Array[float]`/`Array[int]` | 3-5× iter | bulk numeric |
 | 8 | Hand-inline the hot body | ~3.3× (removes a static-func call, 4.8.dev) | profiler-confirmed |
 | 9 | GDExtension (C++) | 10-100× | last resort |
-| 10 | Lower tick / batch ticks (one EnemyManager loop vs per-Node) | linear w/ freq cut | N × per-frame cost = bottleneck |
+| 10 | Tick less: skip dead, LOD the distant, cut far-tick frequency (D8) | linear w/ work cut | N × per-frame cost = bottleneck |
 
 Trap: preemptive inlining loses reuse, hides intent, almost never moves needle. Sanity: `(call cost ns) × (calls/sec)` vs `16_600_000 ns` (60fps). < 10_000 ns → dispatch irrelevant, find another bottleneck.
 

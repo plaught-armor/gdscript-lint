@@ -175,9 +175,12 @@ _RE_WHILE_DESC = re.compile(r"^(\s*)while\s+([A-Za-z_]\w*)\s*(?:>=|>)\s*-?\d+\s*
 # (range() builds an untyped Array — engine-bugs.md C14 #110659). Needs a
 # paren-balanced arg split because range(coll.size()) has nested parens.
 _RE_FOR_RANGE = re.compile(r"\bfor\s+\w+(?:\s*:\s*\w+)?\s+in\s+range\(")
-# C3: typed Array assigned directly from .filter()/.map() — both return an
-# UNTYPED Array (#72566), so the typed annotation is a lie; must go through
-# .assign(). The ': Array[T] =' anchor excludes the correct 'x.assign(...)' form.
+# C3: typed Array assigned directly from .filter()/.map() — returns an UNTYPED
+# Array (#72566), so the typed annotation is a lie; must go through .assign().
+# The ': Array[T] =' anchor excludes the correct 'x.assign(...)' form.
+# 4.8.dev re-test: the .filter() half is FIXED (returns typed), .map() is still
+# untyped. Both stay flagged — the fix is harmless, and which half bites depends
+# on the project's minimum Godot. See rules/engine-bugs.md C3.
 _RE_C3_FILTER = re.compile(r":\s*Array\[\w+\]\s*=\s*[\w.]+\.(?:filter|map)\(")
 # C14: typed Array assigned from range() — range() returns an untyped Array
 # (#110659). Same fix: .assign(range(...)) or iterate.
@@ -408,7 +411,7 @@ def rule_l3(raw: str, m: str) -> str | None:
 
 def rule_c3(raw: str, m: str) -> str | None:
     if _RE_C3_FILTER.search(m):
-        return "C3: typed Array assigned from .filter()/.map() — these return an untyped Array (#72566); use 'x.assign(coll.filter(...))'"
+        return "C3: typed Array assigned from .filter()/.map() — returns an untyped Array (#72566); use 'x.assign(coll.map(...))' (4.8.dev: .filter() half fixed, .map() still untyped)"
     return None
 
 
