@@ -22,4 +22,6 @@ paths:
 
 Some flag IDs (e.g. C13, H7, M4, S2, P6) referenced inline condensed — one-line summary at point of reference = the rule.
 
+Rules are canonical and carry measured numbers, per-bug version status, and exceptions. Read the entry before acting on a flag ID; don't quote a multiplier or a bug status from memory. Deeper evidence — the `bible/` chapters and `tests/` benchmarks these rules cite as `../bible/...` — is deliberately not in context; read on demand at `/mnt/based_backup/Repos/gdscript-lint/bible/` and `/mnt/based_backup/Repos/gdscript-lint/tests/`.
+
 Project-local rule overrides take precedence over these defaults.
