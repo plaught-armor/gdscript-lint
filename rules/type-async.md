@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/*.gd"
+  - "**/*.tscn"
+  - "**/*.tres"
+  - "**/project.godot"
+---
+
 # GDScript — Type System & Async
 
 **No `:=`** (H1) — always `var x: Type = value`. `:=` also typed (perf wash, §03 measured) → ban = consistency/readability, not speed. Static typing vs untyped `var x =` ~25-47% faster (workload-dep; ~1.35× typical 4.8.dev).

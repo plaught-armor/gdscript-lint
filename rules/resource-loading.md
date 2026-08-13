@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/*.gd"
+  - "**/*.tscn"
+  - "**/*.tres"
+  - "**/project.godot"
+---
+
 # GDScript — Resource Loading
 
 How `.tres` / `.tscn` / `Resource` load, cache, free in Godot 4. When `preload` vs `load` vs `load_threaded_request`. Cache hygiene rules learned hard way.

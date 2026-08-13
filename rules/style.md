@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/*.gd"
+  - "**/*.tscn"
+  - "**/*.tres"
+  - "**/project.godot"
+---
+
 # GDScript — Style & Conventions
 
 ## Trivia

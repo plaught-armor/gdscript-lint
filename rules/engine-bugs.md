@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/*.gd"
+  - "**/*.tscn"
+  - "**/*.tres"
+  - "**/project.godot"
+---
+
 # GDScript — Engine Bugs
 
 Crash, leak, or silently corrupt. Each links Godot issue where one exists.

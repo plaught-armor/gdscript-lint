@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/*.gd"
+  - "**/*.tscn"
+  - "**/*.tres"
+  - "**/project.godot"
+---
+
 # GDScript — Data-Oriented Design
 
 Default paradigm. Code transforms data; doesn't *model* things. Reject three lies (Acton):

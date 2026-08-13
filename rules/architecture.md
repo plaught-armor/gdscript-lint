@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/*.gd"
+  - "**/*.tscn"
+  - "**/*.tres"
+  - "**/project.godot"
+---
+
 # GDScript — Architecture
 
 Cross-project skeleton + decision rubric. Scaffolds new Godot projects + answers "where does X live?"

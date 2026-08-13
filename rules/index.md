@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/*.gd"
+  - "**/*.tscn"
+  - "**/*.tres"
+  - "**/project.godot"
+---
+
 # GDScript Rules — Index
 
 **Canonical knowledge** — teaching prose + rationale per rule. These files = source of truth; automated linter/reviewer enforces subset as terse flag conditions citing back here. `dod.md` = full data-oriented-design deep-dive (rules D1-D11, incl. D2a/D2b/D5a/D7a/D7b/D10a, plus the dispatch-cost table and perf rules P18-P22).

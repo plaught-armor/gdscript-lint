@@ -23,13 +23,39 @@ gap, with each rule tied to a Godot issue number where one exists.
 | Piece | What |
 |---|---|
 | `gd-lint.py` | The linter — pure Python stdlib (no pip, no tree-sitter), one file. Masks strings/comments, applies the rules, exits non-zero on a blocking finding. |
-| `rules/*.md` | The canonical knowledge — teaching prose + rationale for every rule, with Godot issue links. `index.md` is the map. |
+| `rules/*.md` | The canonical knowledge — teaching prose + rationale for every rule, with Godot issue links. `index.md` is the map. Each file opens with a `paths:` frontmatter block (see below) — keep it. |
 | `tests/` | Per-rule fixtures + a runner that asserts each rule fires exactly where expected, validated against real GDScript the engine accepts. |
 | `BENCH.md` | Measured perf data for every perf-motivated rule + the promotion criterion. |
 
 > This repo is the canonical home. The author's Claude Code setup consumes it by
 > symlink (`integrations/claude-code/`), so the linter and rules have one source
 > of truth and don't drift.
+
+### Why the rule files carry YAML frontmatter
+
+Every `rules/*.md` file starts with:
+
+```yaml
+---
+paths:
+  - "**/*.gd"
+  - "**/*.tscn"
+  - "**/*.tres"
+  - "**/project.godot"
+---
+```
+
+That block is a Claude Code [path-scoped rule](https://code.claude.com/docs/en/memory)
+declaration, and it is load-bearing for anyone who symlinks this directory into
+`~/.claude/rules/`. A rules file **without** a `paths` field is loaded into the
+context window at the start of *every* session in *every* project — this corpus
+is ~90 KB (~22k tokens), so an unscoped copy costs that on every Rust, Python,
+or prose session too. With `paths`, the file loads only once Claude actually
+reads a Godot file.
+
+The frontmatter is inert markdown metadata for every other consumer (GitHub
+renders it as a table, other editors ignore it). Don't strip it when editing a
+rule.
 
 ## Rules
 
