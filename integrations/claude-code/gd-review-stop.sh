@@ -63,7 +63,12 @@ input="$(
 
 rubric='You are gdscript-reviewer. Review the GDScript below against the Godot engine-bug rules. Output ONLY compact JSON, no prose: {"critical":[{"file":"","line":0,"rule":"","why":""}],"advisory":[{"file":"","line":0,"rule":"","why":""}]}. CRITICAL = will crash, leak, or corrupt at runtime ONLY: C2/C2a static shared-mutable Array/Dict not made read_only; C3 typed .filter()/.map() assigned without .assign(); C5 await on a Node then use without is_instance_valid(); C7 RefCounted circular ref leak; C8 freed instance-id reused without validity AND type check; C11 sort_custom comparator using <= instead of strict <; C12 assert() used for runtime validation (stripped in release); C17 .tres<->.tscn preload cycle. Everything else (typing, style, DOD shape, naming) goes in advisory, never critical. Use empty arrays when none. Be conservative: if unsure an issue truly crashes/leaks/corrupts, put it in advisory.'
 
-verdict="$(printf '%s' "$input" | GD_REVIEW_NESTED=1 timeout 150 claude -p --bare --append-system-prompt "$rubric" 2>/dev/null)"
+# --model: this is a fresh `claude -p` session, not a subagent, so without it
+# the gate inherits the host's default model — Opus on a machine that sets one,
+# for a fixed-rubric classification into two JSON arrays. GD_REVIEW_MODEL lets a
+# host put this tier back up (or further down) without editing the script.
+verdict="$(printf '%s' "$input" | GD_REVIEW_NESTED=1 timeout 150 \
+  claude -p --bare --model "${GD_REVIEW_MODEL:-sonnet}" --append-system-prompt "$rubric" 2>/dev/null)"
 
 # strip any code fences the model may wrap around the JSON
 verdict="$(printf '%s' "$verdict" | sed -e 's/^```json//' -e 's/^```//' -e 's/```$//')"
