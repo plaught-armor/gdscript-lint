@@ -95,7 +95,7 @@ func _initialize() -> void:
 		_keys6[i] = 5 # always the last of 6 arms — isolates linear-scan cost
 	print("--- §1 dispatch (baseline = Array[Callable] index = 1.00x; >1 faster) ---")
 	var base: int = _bench_callable()
-	print("  Array[Callable] index        = %7d us  1.00x" % base)
+	print("  Array[Callable] index        = %7d us  %8.1f ns/op  1.00x" % [base, _ns_per_op(base)])
 	_report1("match + direct call", base, _bench_match3_call())
 	_report1("if/elif + direct call", base, _bench_ifelif3_call())
 	_report1("if/elif + inline body", base, _bench_ifelif3_inline())
@@ -103,7 +103,7 @@ func _initialize() -> void:
 	_report1("if/elif, 6 arms, hit last", base, _bench_ifelif6_last())
 	print("--- §2 call overhead (baseline = inline = 1.00x; >1 slower) ---")
 	var inl: int = _bench_inline()
-	print("  inline expression            = %7d us  1.00x" % inl)
+	print("  inline expression            = %7d us  %8.1f ns/op  1.00x" % [inl, _ns_per_op(inl)])
 	_report2("static func on RefCounted", inl, _bench_static())
 	_report2("instance method, cached ref", inl, _bench_instance())
 	_lam = func(x: int) -> int: return x + 1
@@ -115,6 +115,7 @@ func _initialize() -> void:
 	_report2("lambda wraps static fn .call", inl, _bench_lambda_wrap())
 	_report2("method-ref Callable .call", inl, _bench_method_callable())
 	_report2("get_node() per call", inl, _bench_get_node())
+	_report2("signal.emit(), 0 listeners", inl, _bench_signal(0))
 	_report2("signal.emit(), 1 listener", inl, _bench_signal(1))
 	_report2("signal.emit(), 4 listeners", inl, _bench_signal(4))
 	quit()
@@ -124,12 +125,17 @@ func _best(a: int, b: int) -> int:
 	return a if a < b else b
 
 
+func _ns_per_op(t: int) -> float:
+	# t is the best-of-REPS wall time in us for one N-iteration loop.
+	return float(t) * 1000.0 / float(N)
+
+
 func _report1(label: String, base: int, t: int) -> void:
-	print("  %-28s = %7d us  %.2fx" % [label, t, float(base) / float(t)])
+	print("  %-28s = %7d us  %8.1f ns/op  %.2fx" % [label, t, _ns_per_op(t), float(base) / float(t)])
 
 
 func _report2(label: String, base: int, t: int) -> void:
-	print("  %-28s = %7d us  %.2fx" % [label, t, float(t) / float(base)])
+	print("  %-28s = %7d us  %8.1f ns/op  %.2fx" % [label, t, _ns_per_op(t), float(t) / float(base)])
 
 # ---------------- §1 dispatch ----------------
 

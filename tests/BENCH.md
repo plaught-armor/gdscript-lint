@@ -86,10 +86,17 @@ CORRECT rule (no perf claim, like C9): an untyped `signal foo(a, b)` can't be
 ## Dispatch & call-overhead (bench_dispatch_mechanism.gd)
 
 Backs Part III §1 (dispatch) + §3c (call overhead) of the bible. N=600k rows,
-best-of-7, **median of 5 runs** (the one run hit by background contention is
-discarded — see below), Godot 4.8.dev (rebuilt 2026-06-26). Discriminators are
-read from a pre-filled `PackedInt32Array` so every variant pays the same key-fetch
-and the matched arm can't be constant-folded.
+best-of-7, **median of 5 runs**, Godot 4.8.dev `00932449c` (re-measured
+2026-08-21). Discriminators are read from a pre-filled `PackedInt32Array` so every
+variant pays the same key-fetch and the matched arm can't be constant-folded.
+
+**Report ns/op, not just ratios.** The bench now prints an absolute `ns/op` column
+(`_ns_per_op()` = best-of-REPS µs × 1000 / N). Prefer it: **the ns figures are
+stable to ~1–3% across runs while the ratios swing ~15%**, because the inline
+baseline is the noisiest row in the table (10.9–13.7 ns, ±8%) and every ratio
+divides by it. `signal.emit()` with 1 listener held at 102.7 ns ±2% across five
+runs while its published multiplier reproduced anywhere from 7.59× to 8.80×. ns
+is also portable between projects — see the autoload row below.
 
 ```bash
 godot --headless --script tests/bench_dispatch_mechanism.gd      # §1 + §2
@@ -98,33 +105,44 @@ godot --headless --path tests/autoload_bench_proj                # autoload row
 
 §1 dispatch (baseline = `Array[Callable]` index = 1.00×, **higher = faster**):
 
-| Construct | vs Callable | reading |
-|---|---|---|
-| `Array[Callable]` index | 1.00× | baseline |
-| `match` + direct call | **0.64×** | slower than the Callable it would replace |
-| `if/elif` + direct call | 1.01× | ~par with Callable |
-| `if/elif` + inline body | **~2.1×** | the only clear win — inlining beats the table |
-| `match`, 6 arms, hit last | **0.37×** | linear scan degrades hard |
-| `if/elif`, 6 arms, hit last | 0.73× | degrades too, but ~2× faster than `match` |
+| Construct | ns/op | vs Callable | reading |
+|---|---|---|---|
+| `Array[Callable]` index | 77.2 | 1.00× | baseline |
+| `match` + direct call | 114.4 | **0.67×** | slower than the Callable it would replace |
+| `if/elif` + direct call | 74.7 | 1.03× | ~par with Callable |
+| `if/elif` + inline body | 35.5 | **~2.2×** | the only clear win — inlining beats the table |
+| `match`, 6 arms, hit last | 199.6 | **0.38×** | linear scan degrades hard |
+| `if/elif`, 6 arms, hit last | 96.7 | 0.80× | degrades too, but ~2× faster than `match` |
 
 §2 call overhead (baseline = inline expr = 1.00×, **higher = slower**; trivial
 inline baseline → ratios are an upper bound on relative overhead). The
-lambda/Callable rows are the new addition:
+`signal.emit()` 0-listener row is the new addition — it isolates the emit's own
+cost from the cost of delivering to anyone:
 
-| Path | × inline | reading |
-|---|---|---|
-| inline | 1.00 | baseline (`acc += i + 1`) |
-| `static func` on RefCounted | ~3.3× | cheapest indirection |
-| **lambda `.call`, no capture** | **~3.6×** | static/instance tier — a lambda call is cheap |
-| **static fn as a `Callable`** (`cb = Helper.add`) | **~3.8×** | matched baseline for the wrapper tax below |
-| **lambda `.call`, captures a local** | **~3.9×** | capture adds ~10% |
-| instance method, cached ref | ~4.3× | |
-| **method-ref `Callable.call`** | **~4.7×** | `obj.method` as a value — bind cost over a direct call |
-| autoload global ident (`Bus.x()`) | ~4.8× | ≈ 1.1× a cached instance call (separate proj, normalized) |
-| **lambda wrapping a named fn** | **~6.5×** | double dispatch. vs ~3.8× to pass that fn as a Callable → **~1.7× tax → P19** |
-| `get_node()` per call | ~7.8× | ~2× a cached ref — cache it |
-| `signal.emit()`, 1 listener | ~7.6× | ≈ a `get_node()` call |
-| `signal.emit()`, 4 listeners | ~19× | scales ~linearly with listeners |
+Sorted by ns/op (the durable column); the `× inline` column is the same data
+against this session's 12.7 ns baseline, kept for continuity with the bible tables:
+
+| Path | ns/op | × inline | reading |
+|---|---|---|---|
+| inline | 12.7 | 1.00 | baseline (`acc += i + 1`), and the noisiest row here |
+| `static func` on RefCounted | 45.4 | ~3.6× | cheapest indirection |
+| **lambda `.call`, no capture** | **52.0** | **~4.1×** | static/instance tier — a lambda call is cheap |
+| **static fn as a `Callable`** (`cb = Helper.add`) | **54.0** | **~4.3×** | matched baseline for the wrapper tax below |
+| instance method, cached ref | 55.6 | ~4.4× | the direct-call reference point |
+| **lambda `.call`, captures a local** | **58.6** | **~4.6×** | capture adds ~10% |
+| autoload global ident (`Bus.x()`) | 60.7 | ~4.8× | ≈ 1.09× a cached instance call (separate proj) |
+| **method-ref `Callable.call`** | **67.0** | **~5.3×** | `obj.method` as a value — bind cost over a direct call |
+| **lambda wrapping a named fn** | **86.6** | **~6.8×** | double dispatch. vs 54.0 ns to pass that fn as a Callable → **~1.6× tax → P19** |
+| **`signal.emit()`, 0 listeners** | **47.2** | **~3.7×** | the emit's own fixed cost, nobody subscribed |
+| **`signal.emit()`, 1 listener** | **102.7** | **~8.1×** | ≈ a `get_node()` call |
+| `get_node()` per call | 106.4 | ~8.4× | ~1.9× a cached ref — cache it |
+| **`signal.emit()`, 4 listeners** | **263.9** | **~20.8×** | scales ~linearly with listeners |
+
+The autoload row is measured in its own project (`tests/autoload_bench_proj/`) —
+autoload globals only exist when a real project registers an `[autoload]`. **In ns
+it needs no normalization:** that project's own instance-method row lands at
+55.9 ns against this bench's 55.6 ns — 0.5% apart across two separate projects and
+processes, which is the cross-check ratios could never give.
 
 Findings:
 
@@ -141,12 +159,32 @@ Findings:
   between the `Callable` invocation and the fn body). Pass the reference; flagged
   advisory **P19** (`tests/fixtures/p19.gd`). Inline-body vs extract-to-named-method
   is perf-neutral — the retired S1 rule has no perf successor.
-- **Absolute ratios drift ±~20% between builds/runs.** This session's numbers run
-  ~0.8× the prior table's (today's rebuild); the **ordering and tiers are the
-  durable finding**, and ratios *between* rows hold (autoload ≈ 1.1× instance in
-  both datasets). One of the 5 runs always spiked high under a background file
-  indexer (baloo) churning the freshly-built binary — best-of-7 + median-of-5
-  discards it; if you reproduce, run on a quiet machine.
+- **A signal costs one direct call per listener, plus 47.2 ns.** Measured at
+  three points: 0 listeners **47.2 ns**, 1 listener **102.7 ns**, 4 listeners
+  **263.9 ns**. The first listener adds 55.5 ns; a direct instance call is
+  **55.6 ns** (0.2% apart). Listeners 2–4 add `(263.9 − 102.7) / 3` = 53.7 ns
+  each. So *delivery* is not the expensive part — dispatching to a subscriber
+  costs what calling it directly costs, and the signal's own charge is the
+  **fixed 47.2 ns of the emit**. (The 0-listener row was added after the
+  decomposition predicted ~49 ns for it; measuring returned 47.2 ns, within 4% —
+  the model is sound.) Two consequences: (1) collapsing a 1-to-1 signal to a direct
+  call saves **47.1 ns** per emit (102.7 → 55.6); (2) **hand-rolling a multicast
+  to dodge signals loses** — 4 listeners through method-ref `Callable`s is
+  4 × 67.0 = 268 ns vs the signal's 263.9 ns. Only a loop of *direct typed* calls
+  beats it (4 × 55.6 = 222 ns, 16%), and that gives up `connect`/`disconnect`
+  lifecycle and H4's typed-param check. → **P18**.
+- **Against the frame budget** (16,666 µs at 60fps): 1000 broadcasts/frame with
+  one listener = 102.7 µs = **0.62% of frame**. Breaking 1% of frame takes
+  **~1,620 broadcasts/frame**; recovering 1% by swapping them all to direct calls
+  takes **~3,540 eliminated broadcasts/frame** (47.1 ns each). 1% of *runtime*
+  (10 ms/sec) takes **~97,000 emits/sec** — which is why P18's old "100/sec"
+  trigger was ~3 orders of magnitude too eager (it fired at ~0.001% of runtime).
+- **Ratios drift ±~20% between builds/runs; ns does not.** Prior tables ran ~0.8×
+  this session's, but per-row ns held to 1–3% and the two projects agree on the
+  instance-method row to 0.5%. Report ns; keep ratios only for tier intuition.
+  One of the 5 runs always spiked high under a background file indexer (baloo)
+  churning the freshly-built binary — best-of-7 + median-of-5 absorbs it; if you
+  reproduce, run on a quiet machine.
 
 ## `elif` vs bare-`if` chain when every arm returns (bench_ifchain_vs_ifelif.gd)
 

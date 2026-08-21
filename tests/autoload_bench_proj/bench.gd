@@ -25,7 +25,7 @@ class Inst:
 
 func _ready() -> void:
 	var inl: int = _bench_inline()
-	print("  inline expression            = %7d us  1.00x" % inl)
+	print("  inline expression            = %7d us  %8.1f ns/op  1.00x" % [inl, _ns_per_op(inl)])
 	_report("static func on RefCounted", inl, _bench_static())
 	_report("instance method, cached ref", inl, _bench_instance())
 	_report("autoload global ident Bus.x()", inl, _bench_autoload())
@@ -36,8 +36,13 @@ func _best(a: int, b: int) -> int:
 	return a if a < b else b
 
 
+func _ns_per_op(t: int) -> float:
+	# t is the best-of-REPS wall time in us for one N-iteration loop.
+	return float(t) * 1000.0 / float(N)
+
+
 func _report(label: String, base: int, t: int) -> void:
-	print("  %-28s = %7d us  %.2fx" % [label, t, float(t) / float(base)])
+	print("  %-28s = %7d us  %8.1f ns/op  %.2fx" % [label, t, _ns_per_op(t), float(t) / float(base)])
 
 
 func _bench_inline() -> int:
