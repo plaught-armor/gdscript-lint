@@ -878,20 +878,22 @@ When a helper is stateless, the cheapest dispatch is a `static func` on a
 [3c](03-performance.md#3c-call-overhead--indirection) — the relevant
 lines, baseline = inlined expression = 1.00×:
 
-| Path | × inline |
-|---|---|
-| inlined expression | 1.00 |
-| `static func` on a `class_name`'d RefCounted | ~3.3 |
-| instance method on a cached ref | ~4.3 |
-| autoload global identifier (`Bus.method()`) | ~4.8 |
-| `get_node(^"X").method()` per call | ~7.8 |
-| `signal.emit()`, 1 listener | ~7.6 |
-| `signal.emit()`, 4 listeners | ~19 |
+| Path | ns/op | × inline |
+|---|---|---|
+| inlined expression | 12.7 | 1.00 |
+| `static func` on a `class_name`'d RefCounted | 45.4 | ~3.6 |
+| instance method on a cached ref | 55.6 | ~4.4 |
+| autoload global identifier (`Bus.method()`) | 60.7 | ~4.8 |
+| `signal.emit()`, 0 listeners | 47.2 | ~3.7 |
+| `signal.emit()`, 1 listener | 102.7 | ~8.1 |
+| `get_node(^"X").method()` per call | 106.4 | ~8.4 |
+| `signal.emit()`, 4 listeners | 263.9 | ~20.8 |
 
-(The autoload row is measured in its own project, `tests/autoload_bench_proj/`,
-against the same inline baseline — autoload globals only exist when a real project
-registers an `[autoload]`. It lands just above the instance-method tier: calling a
-method on a globally-resolved singleton.)
+(The autoload row is measured in its own project, `tests/autoload_bench_proj/` —
+autoload globals only exist when a real project registers an `[autoload]`. It lands
+just above the instance-method tier: calling a method on a globally-resolved
+singleton. The ns column is the durable one; the ratios drift ~15% between runs
+because the inline baseline is the noisiest row, while per-row ns holds to 1–3%.)
 
 Rules of thumb:
 
@@ -924,27 +926,48 @@ func _physics_process(_dt: float) -> void:
 
 ### Signals decouple, they don't speed (P18)
 
-A signal emit is roughly 2× a static call to start, and the cost scales
-linearly with the listener count. The point of a signal is **decoupling** —
-the producer doesn't have to import the consumer set; consumers subscribe and
-unsubscribe independently. That's a real, valuable architectural property. It
-isn't a *performance* property.
+A signal emit costs **47.2 ns** to nobody, **102.7 ns** to one listener and
+**263.9 ns** to four (4.8.dev, table above) — roughly 2× a static call to start, then scaling linearly
+with the listener count. The point of a signal is **decoupling** — the producer
+doesn't have to import the consumer set; consumers subscribe and unsubscribe
+independently. That's a real, valuable architectural property. It isn't a
+*performance* property.
+
+**Where the cost actually sits: one direct call per listener, plus 47.2 ns.**
+The three rows decompose cleanly. An emit with nobody subscribed costs
+**47.2 ns** — the dispatch machinery alone. The first listener adds 55.5 ns
+against a direct instance call's **55.6 ns**; listeners two through four add
+53.7 ns each. So *delivering* to a listener costs what calling it directly would,
+and the signal's own charge is the fixed 47.2 ns. This is the number that decides
+every case below, and it cuts both ways: it makes the 1-to-1 signal genuinely
+wasteful, and it makes hand-rolling your own multicast pointless.
 
 Concretely:
 
-- **Hot path + small known consumer → direct call.** Emitting a signal in
-  `_physics_process` to one known listener is a 2–5× perf bug dressed as
-  architecture.
+- **Hot path + one known consumer → direct call.** Emitting a signal in
+  `_physics_process` to a single known listener is a perf bug dressed as
+  architecture: 102.7 ns where 55.6 ns would do, and the ~47 ns difference is
+  pure ceremony — the listener is already known, already imported, already held.
 - **Decoupled 1-to-N with variable count → signal.** This is what signals are
   for: a producer (`SoundBus.sound_played`) that doesn't know or care which
   enemy `Ears` are listening.
-- **Rule of thumb:** if emit-frequency × listener-count exceeds 100/sec on a
-  hot path, profile before committing. Otherwise the dispatch cost is below
-  the noise floor.
+- **Don't hand-roll a multicast to dodge the signal.** An `Array[Callable]` you
+  dispatch yourself costs 67.0 ns per method-reference call — four listeners is
+  268 ns against the signal's 263.9 ns, i.e. you lose. Only a loop of *direct
+  typed* calls beats it (4 × 55.6 = 222 ns, ~16%), and it costs you the
+  subscribe/unsubscribe lifecycle `connect`/`disconnect` gives you for free, plus
+  H4's typed-param checking. Signals amortize: the fixed 47.2 ns is paid once per
+  broadcast no matter how many listeners share it.
+- **Rule of thumb, in real money:** a 60fps frame is 16,666,000 ns, so
+  single-listener broadcasts have to run **~1,620 times per frame** to cost 1% of
+  it, and **~97,000 times per second** to cost 1% of runtime. Profile when
+  emit-frequency × listener-count clears **~50,000/sec**; below that the dispatch
+  cost is under the noise floor and the decoupling is free.
 
 ```gdscript
 # Bad — signal emit in _physics_process to one known listener. Decoupling you
-# don't use, paid 2–5× per frame; the Ears ref is already right there.
+# don't use, paid at 102.7 ns/frame where 55.6 ns does; the Ears ref is already
+# right there.
 func _physics_process(_dt: float) -> void:
     footstep_made.emit(global_position)      # one listener, every frame
 

@@ -145,33 +145,52 @@ an object, a singleton, a name-lookup, or a list of subscribers all add bookkeep
 on the way in. The table below shows how much each step adds.
 
 Every layer between the call site and the code costs. Measured
-(`bench_dispatch_mechanism.gd`, 600k iters, best-of-7, median of 5 runs with the
-one contended outlier run discarded, **Godot 4.8.dev**; baseline = a hand-inlined
-expression = 1.00×, higher = slower). The inline baseline is deliberately trivial
-(`acc += i + 1`), so these ratios are an *upper bound* on relative overhead. The
-absolute ratios drift **±~20% between builds and runs** — the durable findings are
-the **ordering** and the **tiers**, both stable across runs (e.g. the
-autoload/instance ratio holds at ~1.1× even when both absolutes shift):
+(`bench_dispatch_mechanism.gd`, 600k iters, best-of-7, median of 5 runs,
+**Godot 4.8.dev `00932449c`**). The **ns/op column is the durable one** — it holds
+to ~1–3% across runs, while the ratios beside it swing ~15% because the inline
+baseline is the noisiest row in the table (10.9–13.7 ns) and every ratio divides by
+it. Read ns for budgeting; read the ratio only for tier intuition. The inline
+baseline is deliberately trivial (`acc += i + 1`), so the ratios are an *upper
+bound* on relative overhead:
 
-| Path | × inline |
-|---|---|
-| inlined expression | 1.00 |
-| `static func` on a `class_name`'d RefCounted | ~3.3 |
-| lambda `.call`, no capture | ~3.6 |
-| static fn passed as a `Callable` (`cb = Helper.add`) | ~3.8 |
-| lambda `.call`, captures a local | ~3.9 |
-| instance method on a cached ref | ~4.3 |
-| method-reference `Callable.call` (`obj.method` as a value) | ~4.7 |
-| autoload global identifier (`Bus.method()`) | ~4.8 |
-| lambda wrapping a named fn (`func(x): f(x)`) | ~6.5 |
-| `get_node(^"X").method()` per call | ~7.8 |
-| `signal.emit()`, 1 listener | ~7.6 |
-| `signal.emit()`, 4 listeners | ~19 |
+| Path | ns/op | × inline |
+|---|---|---|
+| inlined expression | 12.7 | 1.00 |
+| `static func` on a `class_name`'d RefCounted | 45.4 | ~3.6 |
+| lambda `.call`, no capture | 52.0 | ~4.1 |
+| static fn passed as a `Callable` (`cb = Helper.add`) | 54.0 | ~4.3 |
+| instance method on a cached ref | 55.6 | ~4.4 |
+| lambda `.call`, captures a local | 58.6 | ~4.6 |
+| autoload global identifier (`Bus.method()`) | 60.7 | ~4.8 |
+| method-reference `Callable.call` (`obj.method` as a value) | 67.0 | ~5.3 |
+| lambda wrapping a named fn (`func(x): f(x)`) | 86.6 | ~6.8 |
+| `signal.emit()`, 0 listeners | 47.2 | ~3.7 |
+| `signal.emit()`, 1 listener | 102.7 | ~8.1 |
+| `get_node(^"X").method()` per call | 106.4 | ~8.4 |
+| `signal.emit()`, 4 listeners | 263.9 | ~20.8 |
 
 (The autoload row needs a real project with a registered `[autoload]`, so it's
-measured separately — `tests/autoload_bench_proj/`, same session — and normalized
-to this baseline via its own re-measured inline/instance rows; the durable fact is
-autoload ≈ 1.1× a cached instance call, not the exact ratio.)
+measured separately — `tests/autoload_bench_proj/`, same session. In ns it needs
+no normalization: that project's own instance-method row lands at 55.9 ns against
+this bench's 55.6 ns, 0.5% apart across two processes. That agreement is the
+argument for the ns column — it is comparable across projects and builds in a way
+a ratio against a local baseline is not.)
+
+**What a signal actually charges: one direct call per listener, plus 47.2 ns.**
+The three signal rows decompose cleanly. An emit nobody subscribed to costs
+**47.2 ns** — that is the dispatch machinery alone. The first listener adds
+55.5 ns, against **55.6 ns** for a direct instance call: 0.2% apart. Listeners
+two through four add 53.7 ns each. So *delivery* to a subscriber costs what
+calling that subscriber directly costs, and the signal's own overhead is the
+fixed 47.2 ns. (That row was added after the two-point decomposition predicted
+~49 ns for it; the measurement came back 47.2 ns, which is the check that the
+model isn't an artifact.) Two things follow, and they point in opposite
+directions from the usual "signals are slow" reading: collapsing a **1-to-1**
+signal into a direct call is a real ~47 ns saving, but **hand-rolling a multicast
+to avoid signals does not pay** — four listeners through method-reference
+`Callable`s costs 4 × 67.0 = 268 ns against the signal's 263.9 ns. Only a loop of
+direct typed calls beats it (222 ns, ~16%), at the price of writing your own
+subscribe/unsubscribe lifecycle. → **P18**, Part IV §4h.
 
 The lambda/Callable rows are the addition. The findings: a **bare lambda call
 sits in the static/instance tier** (~3.6×) — using a lambda as a predicate/comparator
@@ -187,11 +206,14 @@ benefit**. If you already have a named function, **pass the reference** (`f`,
 `obj.method`), don't wrap it. → lint rule **P19** (advisory).
 
 **In plain terms:** in this table higher means *slower* (the opposite of 3b's
-table) — the inline baseline is 1.00, and ~3.3 means "about three times as long as
-just doing the work right there." So a static helper call costs ~3×, a lambda or
-instance method ~3.5–4.5×, an autoload ~4.8×, a `get_node()` lookup ~7.8×, and a
-signal emit with four listeners ~19×. Same answer at the end, very different cost
-to *get* to it.
+table) — the inline baseline is 1.00, and ~3.6 means "about three and a half times
+as long as just doing the work right there." In real money: doing the work inline
+costs ~13 ns, a static helper call ~45 ns, a lambda or instance method ~52–59 ns,
+an autoload ~61 ns, a `get_node()` lookup ~106 ns, and a signal emit with four
+listeners ~264 ns — of which only 47 ns is the signal itself, the rest being the
+four calls it makes on your behalf. Same answer at the end, very different cost to *get* to it —
+though note the whole ladder spans about a quarter of a microsecond, so it only
+shows up when you do it thousands of times per frame.
 
 **In plain terms:** the further the engine has to travel to find the code you want
 to run, the more it costs. Inlining the work is free — there's nothing to find. A
@@ -203,16 +225,20 @@ bookkeeping.
 
 Takeaways:
 
-- **Cache node refs.** `get_node()` per call is ~2× worse than calling through a
-  cached reference (~7.8 vs ~4.3) — `@onready` it once so the lookup happens a
+- **Cache node refs.** `get_node()` per call is ~1.9× worse than calling through a
+  cached reference (106.4 vs 55.6 ns) — `@onready` it once so the lookup happens a
   single time, not every frame. → lint rule **(P3, reviewer)**.
 - **A stateless helper belongs on a `class_name`'d RefCounted as a `static func`**
-  (~3.3×) — the cheapest indirection here, cheaper than an instance method (~4.3×)
-  or an autoload (~4.8×).
-- **A lambda is not expensive to call** (~3.6×, same tier as a method) — but
-  don't wrap a named function in one (`func(x): f(x)` is ~6.5×, vs ~3.8× to pass
-  that fn as a Callable directly — ~1.7× for nothing); pass the reference.
+  (45.4 ns) — the cheapest indirection here, cheaper than an instance method
+  (55.6 ns) or an autoload (60.7 ns).
+- **A lambda is not expensive to call** (52.0 ns, same tier as a method) — but
+  don't wrap a named function in one (`func(x): f(x)` is 86.6 ns, vs 54.0 ns to
+  pass that fn as a Callable directly — ~1.6× for nothing); pass the reference.
   → **P19** (advisory).
+- **Budget in ns, not multipliers.** A 60fps frame is 16,666,000 ns. A ~100 ns
+  indirection has to happen **~1,600 times a frame** to cost 1% of it. Every row
+  in this table is invisible below that rate — which is why the rules that cite
+  it (P3, P18, P19) are about *hot loops*, not about code in general.
 - **Signals decouple; they do not speed.** Emitting to even one listener costs
   about as much as a `get_node()` call, and it scales with listener count — four
   listeners is ~2.4× the one-listener cost. The reason to use a signal is that the

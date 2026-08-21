@@ -314,22 +314,25 @@ So manager-of-Nodes earns keep by **doing less**, not cheaper dispatch:
 
 ## D9 — Static-on-RefCounted vs autoload Node
 
-Measured Godot 4.8.dev (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, best-of-7, median of 5 runs; see bible Part III §2). Absolute ratios drift ±~20% build-to-build — durable findings = **ordering** and **tiers** (instance method edges out autoload; autoload ≈ 1.1× a cached instance call regardless of absolute):
+Measured Godot 4.8.dev `00932449c` (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, best-of-7, median of 5 runs; see bible Part III §2). **Budget in ns, not ratios** — per-row ns holds to 1–3% across runs, ratios swing ~15% because the inline baseline is the noisiest row. Durable findings = ordering + tiers (autoload ≈ 1.09× a cached instance call):
 
-| Dispatch | × inline |
-|---|---|
-| inline | 1.00 |
-| `static func` on `class_name`d RefCounted | ~3.3 |
-| lambda `.call`, no capture | ~3.6 |
-| static fn as a `Callable` (`cb = Helper.add`) | ~3.8 |
-| lambda `.call`, captures a local | ~3.9 |
-| instance method on cached ref | ~4.3 |
-| method-ref `Callable.call` (`obj.method` as value) | ~4.7 |
-| autoload global ident (`SoundBus.emit(...)`) | ~4.8 |
-| lambda wrapping a named fn (`func(x): f(x)`) | ~6.5 |
-| `get_node(^"AutoloadName").method()` per call | ~7.8 |
-| signal_emit, 1 listener | ~7.6 |
-| signal_emit, 4 listeners | ~19 |
+| Dispatch | ns/op | × inline |
+|---|---|---|
+| inline | 12.7 | 1.00 |
+| `static func` on `class_name`d RefCounted | 45.4 | ~3.6 |
+| lambda `.call`, no capture | 52.0 | ~4.1 |
+| static fn as a `Callable` (`cb = Helper.add`) | 54.0 | ~4.3 |
+| instance method on cached ref | 55.6 | ~4.4 |
+| lambda `.call`, captures a local | 58.6 | ~4.6 |
+| autoload global ident (`SoundBus.emit(...)`) | 60.7 | ~4.8 |
+| method-ref `Callable.call` (`obj.method` as value) | 67.0 | ~5.3 |
+| lambda wrapping a named fn (`func(x): f(x)`) | 86.6 | ~6.8 |
+| signal_emit, 0 listeners | 47.2 | ~3.7 |
+| signal_emit, 1 listener | 102.7 | ~8.1 |
+| `get_node(^"AutoloadName").method()` per call | 106.4 | ~8.4 |
+| signal_emit, 4 listeners | 263.9 | ~20.8 |
+
+Frame budget 60fps = 16,666,000 ns. A ~100 ns indirection needs ~1,600 hits/frame to cost 1% of it — below that rate every row here is noise.
 
 - Pure-fn helper → `class_name FooSystem extends RefCounted` + `static func` only. Never instantiate.
 - Cache/registry/RNG seed/pub-sub signal → autoload Node (must be Node to own signals).
@@ -339,11 +342,14 @@ Measured Godot 4.8.dev (`bench_dispatch_mechanism.gd` + `autoload_bench_proj`, b
 
 ## P18 — Signals decouple, don't speed
 
-~2× slower than static fn; scales linearly with listener count. Producer doesn't import consumers (`SoundBus.sound_emitted` → N enemy Ears subscribe).
+47.2 ns to nobody, 102.7 ns to 1 listener, 263.9 ns to 4. Producer doesn't import consumers (`SoundBus.sound_emitted` → N enemy Ears subscribe).
 
-- Hot path + small known consumer → direct call. ⊥ emit signal in `_physics_process` to one known listener (2-5× perf bug).
+**Cost = one direct call per listener + 47.2 ns fixed.** Measured 3 points: first listener adds 55.5 ns vs direct instance call 55.6 ns (0.2% apart); listeners 2-4 add 53.7 ns each. Delivery is not the expensive part; the emit is. An unsubscribed emit (open extension point, nobody listening yet) costs 47.2 ns — cheaper than a `static func` call.
+
+- Hot path + one known consumer → direct call. ⊥ emit signal in `_physics_process` to one known listener — 102.7 ns where 55.6 ns does, ~47 ns of pure ceremony on a consumer already held and imported.
 - Decoupled 1-N w/ variable count → signal.
-- Rule: emit-freq × listener-count > 100/sec on hot path → profile first.
+- ⊥ hand-roll `Array[Callable]` multicast to dodge signals — 4 method-ref calls = 268 ns vs signal 263.9 ns, i.e. **loses**. Only direct typed calls in a loop beat it (222 ns, ~16%), and cost you `connect`/`disconnect` lifecycle + H4 typed-param check. Fixed 47.2 ns amortizes across listeners.
+- Rule: emit-freq × listener-count > **50_000/sec** on hot path → profile first. (1% of frame = ~1,620 broadcasts/frame; 1% of runtime = ~97,000 emits/sec. Old 100/sec trigger fired at ~0.001% of runtime.)
 
 ## Inline perf checklist (ROI-ordered)
 
@@ -362,7 +368,7 @@ Most dispatch cost invisible vs frame budget. Matters only in measured hot loops
 | 9 | GDExtension (C++) | 10-100× | last resort |
 | 10 | Tick less: skip dead, LOD the distant, cut far-tick frequency (D8) | linear w/ work cut | N × per-frame cost = bottleneck |
 
-Trap: preemptive inlining loses reuse, hides intent, almost never moves needle. Sanity: `(call cost ns) × (calls/sec)` vs `16_600_000 ns` (60fps). < 10_000 ns → dispatch irrelevant, find another bottleneck.
+Trap: preemptive inlining loses reuse, hides intent, almost never moves needle. Sanity: `(call cost ns) × (calls/frame)` vs `16_666_000 ns` (60fps) — ns/op column in D9's table above. < 10_000 ns/frame → dispatch irrelevant, find another bottleneck.
 
 ## D10 — Enums over StringNames for finite closed label sets
 
