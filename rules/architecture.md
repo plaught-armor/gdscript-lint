@@ -67,6 +67,48 @@ Promotion path: static-only RefCounted → autoload Node only when state genuine
 
 ## Subsystem shape templates
 
+### System (D6 + D9) — the default shape for behavior
+
+Stateless transforms over passed-in records. `class_name`'d RefCounted, **every method `static`**, never instantiated, no `_init`. Data lives in separate record classes; the system is the verb, the record is the noun.
+
+```gdscript
+# Header + doc-comment shape (old-keep `scripts/systems/push_system.gd`).
+class_name PushSystem
+extends RefCounted
+
+## What a body walking into something loose does to it. Pure transforms over a body, its def and
+## its conditioning (D6), never instantiated (D9).
+## WHY: docs/verbs.md §11
+
+# Param shape, from a sibling system (`hit_reaction_system.gd`) — not a PushSystem member.
+static func settle(
+    channel: HitChannelState,          # record in, mutated in place — data is dumb (D6)
+    hit: HitRecord,
+    bus: SoundBusNode,                 # autoload passed as a param, not reached for
+    body: CharacterBody3D,
+    struck: Signal,                    # announce without owning the emitter
+) -> void:
+    report(bus, hit, body.get_instance_id())
+    TrainingSystem.absorb(...)         # systems call each other statically
+    struck.emit(hit.impulse, hit.direction)
+```
+
+Four properties, each load-bearing:
+
+1. **No instance, no `_init`, no `.new()`.** Call site is the bare `class_name`: `LocomotionSystem.probe_ground(self, _ground, delta)`. Cheapest indirection measured (45.4 ns, D9 table) and nothing to thread a reference for.
+2. **Records are pure fields.** A data class carries `@export`/`var` and at most an `_init`; every verb touching it lives on a system. Prevents the D4 monolith where N systems each bolt a method onto one class.
+3. **Autoload deps arrive as typed params, not `get_node` at the call site.** Fetch once at boot, cache typed, thread through:
+   ```gdscript
+   var _sound_bus: SoundBusNode                                        # typed field
+   _sound_bus = get_node_or_null(^"/root/SoundBus") as SoundBusNode    # once, in _ready
+   ```
+   This is the sanctioned variant of D9, not a violation of it: the lookup is paid once at boot (106.4 ns, once) instead of per call, callers pay an ordinary param access, and `null` is tolerated so the system degrades to one missing effect. It buys headless testability — **an autoload's global identifier does not resolve under a `godot --script` run**, which is how systems get verified without a scene.
+4. **A `Signal` can be a parameter.** A static system with no emitter of its own takes `struck: Signal` and emits through it — the owning Node keeps the signal, the system keeps the logic. Note the ordering hazard: an emit runs subscribers before the function returns, so finish mutating state before emitting.
+
+**Static state is the exception, and it has two legitimate forms:** a registry table (`static var` + `_static_init` + `make_read_only`, → Registry template below) and a per-frame cache keyed by instance id. Anything else that wants state is a Manager or an autoload, not a System.
+
+Worked reference: `old-keep` runs 24 systems this way — 248 `static func`, **zero** instance methods, **zero** `.new()` call sites, against 30 record classes in `scripts/data/` of which only four declare any method at all (all `_init`).
+
 ### Registry (D1 + D11 + C2a)
 
 ```gdscript
@@ -158,6 +200,8 @@ Parent scene-root calls `_hud.init_hud(...)` once. Controllers borrow widgets vi
 | Set ID: `is Player` or `is_in_group(&"player")`? | `is Player` when class-narrowing fits — same O(1), compile-time-checked | [`dod.md`](dod.md) D2a |
 | Membership container: group or owner-held array? | group only if tree-wide + decoupled consumers + no single owner; else owner's typed `Array[T]` / `Dictionary[int, T]` | [`dod.md`](dod.md) D2b |
 | Helper: static-RefCounted or autoload Node? | static-RefCounted; promote only when state needed | [`dod.md`](dod.md) D9 |
+| Behavior over a data record: method on the record or system fn? | `static func` on a `*System` RefCounted; record stays pure fields | [`dod.md`](dod.md) D6/D9, System template above |
+| System needs an autoload (bus, pool)? | Resolve once at boot into a typed field, pass as a param; never the bare global inside a system | System template above |
 | `class_name` on an autoload script? | No — collides with autoload name (`Class hides an autoload singleton`). Bare `extends Node`, access by autoload name | "Canonical autoloads" note above |
 | Cross-system / serialized ref: object or ID? | Integer ID + resolve at use site; object refs only for parent→child + sibling-by-injection | [`dod.md`](dod.md) D3 |
 | Sibling ref inside scene: `@export NodePath` or typed `init_*()`? | Typed `init_*()` push-injection from scene-root script | [`style.md`](style.md) M11 |

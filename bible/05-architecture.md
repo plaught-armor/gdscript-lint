@@ -214,14 +214,106 @@ Two non-obvious points:
 
 ## 5d. Subsystem shape templates
 
-**In plain terms:** four ready-made layouts for the parts every game ends up
-building — a master list of items, a thing that updates lots of enemies at
-once, a HUD wrapper that holds the on-screen widgets, and a base scene that
-other scenes copy from. Copy the shape; fill in the specifics.
+**In plain terms:** five ready-made layouts for the parts every game ends up
+building — a box of loose functions that does the actual work, a master list of
+items, a thing that updates lots of enemies at once, a HUD wrapper that holds the
+on-screen widgets, and a base scene that other scenes copy from. Copy the shape;
+fill in the specifics.
 
 These are not abstract patterns — they are the concrete file shapes that the
 rest of this part assumes. Each template carries a label like *(D1 + D11 + C2a)*
 naming the data-oriented and engine-bug rules it satisfies.
+
+### System (D6 + D9) — where behavior goes
+
+**In plain terms:** a "system" is a box of loose functions. Nothing gets
+constructed; you call them by name — `CarrySystem.can_carry(prop, limit, size)`.
+What it replaces is the habit of hanging those same functions on the thing they
+act on: a `pick_up()` method on the Player, an `apply()` method on the damage
+record. The functions are identical either way. The difference is who owns them,
+and ownership is what causes the trouble.
+
+Four plain reasons the box wins:
+
+**1. The same behavior has to serve things that aren't related.** A player and a
+training dummy both pick things up, both crouch, both fall off ledges. Neither is
+a *kind of* the other — a dummy is not a player with fewer features, and a player
+is not a dummy with a camera. If carrying lives on the Player class, the dummy
+either inherits from Player (nonsense, and it drags the camera and the input
+handling along) or gets a copy of the code that quietly drifts out of sync. As
+loose functions, both call the same code and neither one owns it. This is the
+reason that actually bites in practice; the others are conveniences by
+comparison.
+
+**2. You can run it without running the game.** A function that takes a record
+and changes it needs no scene, no window, no node tree — just the record. You can
+check it in a headless script that finishes in milliseconds. A method on a Node
+needs the Node, which needs the tree, which needs the scene, which needs a
+running game. That difference decides whether the behavior gets tested at all.
+
+**3. Everything that can change a thing stays in one file.** Ask "what can alter
+a crouch?" and the answer is: read `CrouchSystem`, that's the list. When behavior
+rides on the noun instead, every new feature bolts one more method onto Player,
+and after a year nobody can enumerate what touches it — the class has become the
+place where everything happens, which is the D4 monolith this whole part is
+arranged to avoid.
+
+**4. Verbs with two objects have no natural home.** Pushing involves the body
+doing the pushing and the loose thing being pushed. Whose method is `push()`?
+Both answers are defensible, which is the tell that the question is wrong. As a
+system it doesn't arise: `PushSystem.push(body, prop)` names both and belongs to
+neither.
+
+It is also the cheapest call the engine offers — 45.4 ns, nothing allocated,
+no reference to hold or free (§3c). But speed is a side effect here, not the
+argument. The argument is reason 1.
+
+**The honest cost:** you lose `obj.` autocomplete as a way of discovering what
+you can do to a thing, and you pass more arguments — `old-keep`'s
+`HitReactionSystem.settle()` takes eight. The answer to the second is the first
+template's other half: arguments that always travel together become a record
+(`HitChannelState`, `CarryState`), and then the system takes two params instead
+of nine. If you find yourself passing the same six values everywhere, you've
+found a record you haven't written yet.
+
+```gdscript
+# Bad — behavior riding on the data. Only a Player can ever do this, and the
+# record now needs to know what an Enemy is.
+class_name HitResult extends RefCounted
+var damage: int
+var crit: bool
+func apply(target: Enemy) -> void:
+    target.health -= damage
+    if crit:
+        target.stagger()
+
+# Good — the record is dumb, the verb is a static function, and any body at all
+# can be the target (D6 + D9).
+class_name HitResult extends RefCounted
+var damage: int
+var crit: bool
+
+class_name CombatSystem extends RefCounted
+static func resolve(hit: HitResult, target: Node3D) -> void:
+    target.health -= hit.damage
+    if hit.crit:
+        target.stagger()
+```
+
+Shape rules: `class_name`'d RefCounted, every method `static`, no `_init`, never
+instantiated, and no `.new()` anywhere. State is the exception and takes exactly
+two forms — a frozen registry table (`static var` + `_static_init` +
+`make_read_only`, see below) or a per-frame cache keyed by instance id. Anything
+else wanting state is a Manager or an autoload, not a System.
+
+**Worked reference.** `old-keep` runs 24 of these: 248 `static func`, zero
+instance methods, zero `.new()` call sites, against 30 record classes of which
+only four declare a method at all (each an `_init`). `Player` and `Dummy` there
+are siblings — both `extends StairsCharacter`, neither derived from the other —
+and they share `CarrySystem` (12 call sites vs 15), `LocomotionSystem` (18 vs 9)
+and `CrouchSystem` (11 vs 6), while `PerceptionSystem` is 25 call sites in the
+dummy and 1 in the player. Under the method-on-the-class shape that split is
+either an inheritance lie or a copy.
 
 ### Registry (D1 + D11 + C2a)
 

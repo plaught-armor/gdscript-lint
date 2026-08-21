@@ -82,7 +82,13 @@ the official docs say:
   parent reasonably mean[s] the children should also be removed"; sub-scenes
   "should have no dependencies."
 
-### Communication: "call down, signal up"
+### Communication: "call down, signal up" — and where it stops being true
+
+**In plain terms:** the community rule of thumb says a node should *call* its
+children directly and *announce* things upward with signals. That's a decent
+default, but it's a slogan about tree direction standing in for a rule about
+knowledge — and the two come apart often enough that applying it by rote produces
+a measurable perf bug and a brittle tree.
 
 The phrase is community vernacular (kidscancode, gogogodot); the *principle* is
 in the official docs, unnamed: connect to a signal to "respond to behavior, not
@@ -92,14 +98,79 @@ The canonical shape: a node reaches **down** to children via `get_node()` /
 `$Child`; it talks **up** or **sideways** via signals; the *common parent* wires
 the connections
 ([kidscancode node communication](https://kidscancode.org/godot_recipes/4.x/basics/node_communication/index.html)).
-This is exactly Part V's M11 (push-injection from the scene-root) seen from the
-communication side, and it's why signals exist as a first-class language feature
-— see Part III for their cost (≈3× a direct call) and Part IV **P18** for when
-that cost is a bug.
+
+What the maxim is actually a proxy for is **knowledge asymmetry**: the reusable
+end of an edge must not name the end that contains it. Sub-scenes "should have no
+dependencies" ([scene_organization](https://docs.godotengine.org/en/stable/tutorials/best_practices/scene_organization.html));
+that is the invariant, and tree direction is only a rough guess at where it sits.
+Four places the guess is wrong:
+
+1. **A signal to your owner decouples nothing.** If exactly one parent listens,
+   forever, and it is the node that spawned you, the coupling the signal is meant
+   to break is already unbreakable in the other direction: the parent imports your
+   type, holds your reference, and outlives you. A back-reference is legal here
+   precisely because the lifecycles are co-extensive (Part IV **D3** — object refs
+   for parent↔child, IDs for everything else). You pay **102.7 ns** for the emit
+   where a call on the typed reference costs **55.6 ns** (§3c, 4.8.dev), and you
+   buy an indirection the reader has to chase to find the one handler.
+2. **"Call down" spelled as a tree path contradicts M11.** `$Child` and
+   `get_node(^"../HealthBar")` are the canonical phrasing of the downward half,
+   and they are exactly the path-string coupling Part V's **M11** exists to
+   remove: push-injection from the scene root, typed `init_*()`, compile-time
+   errors instead of null at runtime, and no strings to rot when the tree is
+   restructured. Per-call `get_node()` is also **106.4 ns** — the slowest row in
+   the dispatch table short of a multi-listener emit, and ~1.9× the cached ref it
+   replaces.
+3. **Tree position is not ownership.** A bullet is parented to the world so it
+   doesn't inherit the muzzle's transform, but it is owned by the gun that fired
+   it; a pooled effect is parented wherever the pool lives. "Up" and "down" in the
+   tree answer a question about transform inheritance and `free()` propagation,
+   not about who depends on whom. Where the two disagree, follow the dependency,
+   not the tree.
+4. **Most real edges are neither up nor down.** Cross-system traffic — inventory
+   to HUD, save to every registry, a footstep to every enemy `Ears` in the level —
+   has no common parent worth naming, and the maxim is silent. That silence is why
+   every project eventually grows a bus or a registry: `SoundBus` for
+   producer-doesn't-know-consumers pub-sub, `RegistryRoot` + integer IDs for
+   anything serialized or outliving a scene (Part V, **D11**).
+
+What survives all four is the half worth keeping: **the common parent owns the
+wiring, and the reusable node never names its container.** Signals are one
+mechanism that gets you there; an injected `Callable`, a typed interface method on
+a pushed dependency, and a registry subscription are others.
+
+**The cost argument, done honestly.** "Signals are slow, so avoid them" is as
+rote as the maxim it reacts to, and the measurements don't support the usual
+conclusion. A signal costs **one direct call per listener, plus 47.2 ns**: an emit
+nobody subscribed to is 47.2 ns, one listener is 102.7 ns, four is 263.9 ns, and
+the 55.5 ns the first listener adds is within 0.2% of a direct instance call
+(55.6 ns). *Delivery* isn't the expensive part; the fixed 47.2 ns of the emit is,
+and it is paid once per broadcast however many listeners share it. Note what the
+0-listener row licenses: **leaving a signal in place for consumers you don't have
+yet costs 47.2 ns per emit** — less than a `static func` call (45.4 ns) plus
+change. An unsubscribed extension point is close to free; it's the *known*
+consumer routed through a signal that wastes. So the 1-to-1 signal is genuinely wasteful (~47 ns of ceremony), but
+**hand-rolling an `Array[Callable]` to escape signals loses outright** — four
+method-reference calls is 268 ns against the signal's 263.9 ns, and you've
+rebuilt `connect`/`disconnect` lifecycle by hand and given up H4's typed-param
+checking. When a broadcast really is too expensive, the fix is to broadcast less
+often (Part IV **D8** batched-tick: one manager call over a typed array beats N
+per-entity emits), not to re-implement multicast.
+
+Pick by shape, not by direction:
+
+| Edge | Mechanism | Rule |
+|---|---|---|
+| 1-to-1, consumer known and owns the producer | Direct call on a pushed typed ref (or a back-ref — lifecycles are co-extensive) | M11, D3 |
+| 1-to-N, count varies, subscribers come and go | `signal` on the producer, common parent connects | this section |
+| Producer must not know the consumer set, consumers tree-wide | Autoload pub-sub (`SoundBus.sound_played`) | D9 |
+| Serialized, or lifetimes differ | Integer ID + registry resolve, never a stored object ref | D3, D11 |
+| Any of the above on a hot path | emit-freq × listeners > ~50,000/sec → measure first | **P18** |
 
 ```gdscript
-# Good — parent reaches DOWN to a child by direct method call; the child talks UP
-# via a signal the common parent connects (M11 push-injection, seen from comms).
+# Good — variable consumer count, and the arena doesn't know which enemy dies:
+# the child announces UP, the common parent owns the connection (M11 seen from the
+# communication side).
 class_name Enemy extends CharacterBody3D
 signal died(id: int)                      # up: announces, doesn't act on the result
 func take_hit(amount: int) -> void:       # down: the parent calls this on the child
@@ -112,6 +183,34 @@ func _ready() -> void:
     for e: Enemy in _spawn_wave():
         e.died.connect(_on_enemy_died)    # up-signal handled here, not in the enemy
 ```
+
+```gdscript
+# Bad — the maxim applied by rote. One listener, forever, and it's the owner: the
+# emit (102.7 ns) replaces a call on a reference the owner already holds (55.6 ns),
+# every physics frame. The reach-down is a path string (106.4 ns) that breaks the
+# first time the tree is restructured. → P18, P3.
+class_name Hurtbox extends Area3D
+signal overlap_ticked(count: int)         # who else could ever listen?
+
+func _physics_process(_dt: float) -> void:
+    overlap_ticked.emit(get_overlapping_bodies().size())
+    $"../HealthBar".refresh()
+
+# Good — the owner pushes itself in once (M11); the child calls back directly. Same
+# asymmetry (Hurtbox names a type, not a tree path), one dispatch tier cheaper.
+class_name Hurtbox extends Area3D
+var _body: Fighter                        # typed: misconfiguration is a parse error
+
+func init_hurtbox(body: Fighter) -> void:
+    _body = body
+
+func _physics_process(_dt: float) -> void:
+    _body.on_overlap_tick(get_overlapping_bodies().size())
+```
+
+Engine-emitted signals (`body_entered`, `tree_exiting`, `timeout`) sit outside
+this argument entirely — the producer is the engine, the consumer set is genuinely
+open, and there is no direct call to prefer.
 
 ### Node vs Resource — the orthogonal axis
 
