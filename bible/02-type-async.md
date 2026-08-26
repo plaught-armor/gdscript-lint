@@ -209,39 +209,59 @@ untyped param is even.)
 
 ### H14 / H14b — No redundant `as` after `is`, no `as` after typed access
 
-**In plain terms:** once you've checked `if x is Enemy`, the compiler already
-knows `x` is an `Enemy` inside that block — writing `(x as Enemy).foo` does the
-same check twice and slows things down. Same idea for typed dictionaries and
-arrays: the value comes out with its type already attached, so an extra cast is
-just paperwork.
+**In plain terms:** checking `if x is Enemy` does **not** tell the compiler
+anything — it only decides which branch runs. Inside that branch `x` is still
+whatever it was declared as, so `(x as Enemy).foo` pays a real conversion every
+single time you write it. Name the thing once (`var e: Enemy = x`) and use the
+name. Typed dictionaries and arrays are the opposite case: the value really does
+come out with its type attached, so an extra cast there is pure paperwork.
 
-`if x is T:` already narrows `x` inside the branch — a follow-up `(x as T).member`
-is a Variant round-trip that produces the type the compiler already had.
-Likewise, typed-container access is already typed: `Dictionary[K, V].get(k)`,
-`dict[k]`, `Array[T][i]` all return typed `V`/`T`. Re-casting with `as T` is the
-same wasted round-trip.
+**`is` does not narrow, and the editor lies about it.** Measured 4.8.dev with
+`unsafe_method_access=2`, inside `if bt is Dictionary:` the analyzer still reports
+`bt` as `Variant` — "The method `keys()` is not present on the inferred type
+`Variant`" — and a class-typed var behaves the same (`if n is Node2D:` leaves `n`
+a `Node`, so `n.flip_h` trips `unsafe_property_access`). Autocomplete narrows
+because `modules/gdscript/gdscript_editor.cpp:2488` special-cases the `is` guard,
+a path the source itself labels *"Super dirty hack, but very useful"*. It feeds
+completion only; the type checker and the compiler never see it. So the inline
+cast is not *redundant*, it is *repeated* — and the bare access it would be
+replaced by is an unsafe dynamic lookup, not a typed one.
+
+Typed-container access is the genuinely narrowed case: `Dictionary[K, V].get(k)`,
+`dict[k]`, `Array[T][i]` all return typed `V`/`T` (verified — `var s: String =
+d[0].x` on a `Dictionary[int, Foo]` fails to parse with "Cannot assign a value of
+type int"). Re-casting those *is* a wasted round-trip.
 
 ```gdscript
-# Bad — `x` is already T inside the branch; `as` round-trips.
+# Worst — the cast repeats the runtime check on every access.
 if x is Enemy:
     (x as Enemy).take_damage(5)
+    (x as Enemy).flash()
 
-# Good.
+# Better, but every access is an unsafe dynamic lookup (and warns).
 if x is Enemy:
     x.take_damage(5)
 
-# Bad — `_cells.get(path)` already returns CellState.
+# Best — one check, then statically typed accesses. Hoist the bind above any
+# loop the guard permits; a bind repeated per iteration costs what the cast did.
+if x is Enemy:
+    var enemy: Enemy = x
+    enemy.take_damage(5)
+    enemy.flash()
+
+# Bad — `_cells.get(path)` already returns CellState (H14b).
 var cs: CellState = _cells.get(path) as CellState
 
 # Good.
 var cs: CellState = _cells.get(path)
 ```
 
-Containers carry their type — trust them. **4.8.dev: measured** — the redundant
-cast is real overhead, not just clutter (`bench_redundant_cast.gd`): inside an
-`is`-narrowed branch, `(v as Foo).x` ran ~1.2–1.4× the cost of the narrowed `v.x`;
-on a typed `Dictionary[int, Foo]`, `(d[0] as Foo).x` ran ~1.2–1.6× `d[0].x`. So
-dropping the redundant `as` is both cleaner and modestly faster in a hot loop.
+Containers carry their type — trust them. **4.8.dev: measured**, ns per access,
+2M iterations, best of 7 (`bench_redundant_cast.gd`): typed local bound once
+above the loop **23.0**, bare `v.x` **44.7**, `(v as Foo).x` **61.2**, typed local
+re-bound each iteration **61.7**. The bind is both the fastest and the only form
+the type checker can see; the per-use cast is the slowest and buys nothing. On a
+typed `Dictionary[int, Foo]`, `(d[0] as Foo).x` ran ~1.5× `d[0].x`.
 → **H14**, **H14b**.
 
 ### H4 — Type every signal parameter

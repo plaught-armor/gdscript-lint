@@ -82,7 +82,7 @@ Each finding prints `path:line: RULE [CATEGORY]: message`.
 | L3 | STYLE | advisory | `range(N)` count loop (idiom `for i: int in N`; measured break-even) |
 | P22 | PERF | advisory | float `clamp/abs/lerp` → `clampf/absf/lerpf` (~1.3×) |
 | P6 | PERF | advisory | `Array.pop_front()` / `pop_at(0)` — O(n) front-shift (#45455) |
-| H14 | PERF | advisory | `(x as T)` inside `if x is T:` — redundant cast, Variant round-trip |
+| H14 | PERF | advisory | per-use `(x as T)` inside `if x is T:` — `is` does not narrow; the cast repeats the check, bind a typed local once |
 | H13 | CORRECT | advisory | `has_method(&"x")` + `call(&"x")` duck-dispatch (give targets a base class + `is`) |
 | S11 | PERF | advisory | `print()` inside `_process`/`_physics_process`/`_draw` — per-frame sync I/O |
 | P19 | PERF | advisory | pass-through lambda `func(a): f(a)` wrapping a named fn — pass the reference (double-dispatch, ~1.7× vs the reference) |

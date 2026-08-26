@@ -279,17 +279,29 @@ Backs Part I's P9 row (#68834, Lua-style `d.key` slower than `d["key"]`, fixed
 So the old "use brackets for speed" argument is dead on 4.8.dev; bracket access
 remains the style preference for type-clarity (S7), not perf.
 
-## Redundant cast — H14/H14b (bench_redundant_cast.gd)
+## Inline cast inside an `is` guard — H14/H14b (bench_redundant_cast.gd)
 
-Backs Part II H14/H14b: a redundant `as T` adds a Variant round-trip. N=2M,
-best-of-7, 2 runs, Godot 4.8.dev (>1 = the redundant cast is slower):
+Backs Part II H14/H14b. N=2M, best-of-7, Godot 4.8.dev. **`is` does not narrow** —
+inside `if v is Foo:` the analyzer still reports `v` as `Variant` (only
+`gdscript_editor.cpp:2488` narrows, for autocomplete), so the inline cast is not
+redundant but *repeated*, and the bare access it replaces is an unsafe dynamic
+lookup. Four forms of the same access, ns per access:
+
+| Form (inside `if v is Foo:`) | ns/access | statically typed? |
+|---|---|---|
+| `var f: Foo = v` hoisted above the loop, then `f.x` | **23.0** | yes |
+| bare `v.x` | **44.7** | no — `unsafe_property_access` |
+| `(v as Foo).x` per use | **61.2** | yes, per use |
+| `var f: Foo = v` re-bound each iteration | **61.7** | yes |
+
+The bind and the cast cost the same check (~17 ns); the difference is how often
+you pay it. Hoist the bind and every later access is a typed one at roughly half
+the cost of the dynamic access. H14b is the genuinely redundant case — a typed
+container already returns a statically typed element:
 
 | Case | ratio | reading |
 |---|---|---|
-| `(v as Foo).x` vs narrowed `v.x` (inside `if v is Foo`) | **1.2–1.4×** | drop the `as` — `is` already narrowed |
-| `(d[0] as Foo).x` vs `d[0].x` (typed `Dictionary[int, Foo]`) | **1.2–1.6×** | typed container already returns `Foo` |
-
-Modest but real in a hot loop, and free to fix (the cast is pure clutter).
+| `(d[0] as Foo).x` vs `d[0].x` (typed `Dictionary[int, Foo]`) | **1.5×** | typed container already returns `Foo` |
 
 ## Param/signal typing — H4/H10b (bench_param_types.gd)
 

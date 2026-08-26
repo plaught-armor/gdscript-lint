@@ -2,15 +2,17 @@ extends Node
 
 func narrowed(x: Node) -> void:
 	if x is Sprite2D:
-		# 'is' already narrowed x to Sprite2D — the cast is a wasted round-trip.
+		# 'is' narrows nothing (autocomplete only) — this cast repeats the
+		# runtime check on every use. Bind a typed local once instead.
 		(x as Sprite2D).flip_h = true # EXPECT H14
 		print((x as Sprite2D).position) # EXPECT H14
 
 
 func binding_is_allowed(x: Node) -> void:
 	if x is Sprite2D:
-		# H14 explicitly permits 'as' when BINDING to a new var — no parens,
-		# not flagged.
+		# The form H14 prescribes: bind once to a typed local (no parens, not
+		# flagged), then use the name. The 'as' here is optional — 'var s:
+		# Sprite2D = x' performs the same check.
 		var s: Sprite2D = x as Sprite2D
 		s.flip_h = true
 

@@ -31,7 +31,7 @@ Rules (cite the corpus):
   C11  sort_custom(func..<=)  — comparator must be strict '<'/'>' (#58878)
   M1   await in _ready()      — pauses init; call_deferred / separate coroutine
   P6   .pop_front()/.pop_at(0) — O(n) front-shift on Array (#45455) (advisory)
-  H14  (x as T) after 'is T'  — redundant cast, 'is' already narrowed (advisory)
+  H14  (x as T) after 'is T'  — cast repeats the check per use; bind once (advisory)
   H4   signal foo(a, b)        — untyped signal params (#110573); type them
   H13  has_method+call pair    — duck-typed dispatch → base class + 'is' (advisory)
   S11  print() in _process     — per-frame sync I/O; gate/remove (advisory)
@@ -580,22 +580,27 @@ def find_descending_while(masked: list[str]) -> list[tuple[int, str]]:
     return out
 
 
-# H14 (advisory PERF): a parenthesized cast `(x as T)` inside a block already
-# narrowed by `if x is T:` is redundant — `is` narrowed x to T, so the `as` only
-# adds a Variant round-trip (style.md H14). Conservative on two axes: (1) the
-# guard must be EXACTLY `if <id> is <Type>:` (compound conditions like
-# `if x is T and ...:` are skipped — narrowing still holds but the tight match
-# keeps FP at zero); (2) only the PARENTHESIZED cast is flagged — a binding
-# `var y: T = x as T` has no parens and is the one form H14 explicitly allows
-# ("only `as` when binding to new var"). Same id + same Type required.
+# H14 (advisory PERF): a parenthesized cast `(x as T)` used inline inside the body
+# of `if x is T:`. `is` does NOT narrow — measured 4.8.dev, the analyzer still
+# reports `x` as Variant inside the guard, and the narrowing seen in the editor
+# lives in gdscript_editor.cpp (autocomplete only, not the type checker). So the
+# cast is not redundant, it is REPEATED: every use pays the runtime check again
+# (61.2 ns/access vs 23.0 for a typed local bound once above the loop, and 44.7
+# for the bare dynamic access — tests/bench_redundant_cast.gd; style.md H14).
+# Conservative on two axes: (1) the guard must be EXACTLY `if <id> is <Type>:`
+# (compound conditions like `if x is T and ...:` are skipped — the advice still
+# holds but the tight match keeps FP at zero); (2) only the PARENTHESIZED cast is
+# flagged — a binding `var y: T = x as T` has no parens and is the form H14 now
+# actively prescribes. Same id + same Type required.
 _RE_IF_IS = re.compile(r"^(\s*)if\s+([A-Za-z_]\w*)\s+is\s+([A-Za-z_]\w*)\s*:\s*$")
 
 
 def find_redundant_as_after_is(masked: list[str]) -> list[tuple[int, str]]:
-    """Flag `(x as T)` within the body of an `if x is T:` block — the `is`
-    already narrowed x to T, so the inline cast is a wasted Variant round-trip
-    (H14). Scoped to the true-branch (indent > the `if`'s) and to the exact
-    id+Type pair; bounded by MAX_MATCH_ARMS lines per block (NASA-2).
+    """Flag `(x as T)` within the body of an `if x is T:` block — `is` does not
+    narrow, so the inline cast repeats the runtime check on every use; bind a
+    typed local once instead (H14). Scoped to the true-branch (indent > the
+    `if`'s) and to the exact id+Type pair; bounded by MAX_MATCH_ARMS lines per
+    block (NASA-2).
     """
     out: list[tuple[int, str]] = []
     n = len(masked)
@@ -620,7 +625,7 @@ def find_redundant_as_after_is(masked: list[str]) -> list[tuple[int, str]]:
                 break                           # true-branch ended (dedent)
             scanned += 1
             if cast.search(line):
-                out.append((j, "H14: redundant '(%s as %s)' — 'if %s is %s:' already narrowed it; drop the cast (adds a Variant round-trip)" % (var, typ, var, typ)))
+                out.append((j, "H14: per-use '(%s as %s)' — 'is' does not narrow (that is autocomplete only), so this cast repeats the runtime check on every use; bind once instead: 'var %s_t: %s = %s' above the loop, then use the typed local" % (var, typ, var, typ, var)))
             j += 1
         i += 1
     return out
