@@ -70,6 +70,7 @@ Each finding prints `path:line: RULE [CATEGORY]: message`.
 | C11 | CORRECT | block | inline `sort_custom` comparator using `<=`/`>=` (must be strict — #58878) |
 | M1 | CORRECT | block | `await` inside `_ready()` (pauses init — use `call_deferred` / separate coroutine) |
 | H4 | CORRECT | block | untyped `signal` params (type them so `connect` can check — #110573) |
+| H15 | CORRECT | block | a member initializer reading a member declared BELOW it — inits run in declaration order, so it reads the type zero, silently |
 | H1 | PERF | block | `:=` instead of explicit `var x: T =` (static typing ~40% faster) |
 | H2 | PERF | block | untyped `for x in …` (type the loop var) |
 | S6 | PERF | block | `Array[primitive]` where a `Packed*Array` exists |

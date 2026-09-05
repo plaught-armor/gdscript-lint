@@ -36,6 +36,7 @@ Rules (cite the corpus):
   H13  has_method+call pair    — duck-typed dispatch → base class + 'is' (advisory)
   S11  print() in _process     — per-frame sync I/O; gate/remove (advisory)
   P19  func(a): f(a) wrapper   — pass the fn reference; wrapping double-dispatches (advisory)
+  H15  var a = b, b below a    — member inits run in declaration order; reads b's zero (type-async.md)
 
 Each finding is labelled with a CATEGORY: CORRECT (bug / wrong result), PERF
 (speed), or STYLE (idiom). Output line: 'path:line: RULE [CATEGORY]: msg'.
@@ -477,7 +478,7 @@ ADVISORY: set[str] = {"L1", "L2", "L3", "P22", "P6", "H14", "H13", "S11", "P19"}
 CATEGORY: dict[str, str] = {
     "C1": "CORRECT", "C3": "CORRECT", "C9": "CORRECT", "C14": "CORRECT",
     "C11": "CORRECT", "M1": "CORRECT", "H4": "CORRECT", "H13": "CORRECT",
-    "S6c": "CORRECT",
+    "S6c": "CORRECT", "H15": "CORRECT",
     "H1": "PERF", "H2": "PERF", "S6": "PERF", "D7b": "PERF", "P12a": "PERF",
     "L1": "PERF", "L2": "PERF", "P22": "PERF", "P6": "PERF", "H14": "PERF",
     "S11": "PERF", "P19": "PERF",
@@ -797,6 +798,140 @@ def find_duck_dispatch(raw_lines: list[str], masked: list[str]) -> list[tuple[in
     return out
 
 
+# H15 (blocking CORRECT): a member initializer that reads a member declared BELOW
+# it. GDScript runs member initializers in DECLARATION ORDER, so the forward
+# reference reads the field's type zero (0, 0.0, null, empty) rather than its
+# value — silently, no warning, no error, so the field ships a plausible wrong
+# number (measured 4.8.dev, tests/repro_member_init_order.gd; type-async.md H15).
+#
+# Scope is one class body. Locals inside a func are not members, `@onready`
+# initializers run in _ready rather than in declaration order, and a lambda body
+# in an initializer runs later still — all three are skipped, which is what keeps
+# this at the corpus's precision bias. `const` is not tracked on purpose: consts
+# are constant-folded, so a const forward reference reads the real value.
+_RE_MEMBER_VAR = re.compile(
+    r"^(\s*)(?:@\w+(?:\([^)]*\))?\s+)*(static\s+)?var\s+([A-Za-z_]\w*)\s*(?::[^=]*)?(=)?"
+)
+_RE_ONREADY = re.compile(r"^\s*@onready\b")
+_RE_CLASS_HDR = re.compile(r"^(\s*)class\s+[A-Za-z_]\w*")
+# A property accessor block opens a scope exactly as a func does — its body's
+# `var`s are locals. Missing this read every setter-local as a member (measured:
+# the only two survivors of the first real-tree sweep were both setter locals).
+_RE_FUNC_HDR = re.compile(r"^(\s*)(?:(?:static\s+)?func\b|(?:set|get)\s*(?:\([^)]*\))?\s*:)")
+_RE_IDENT = re.compile(r"(?<![.\w])([A-Za-z_]\w*)")
+_RE_LAMBDA = re.compile(r"\bfunc\s*\(")
+_RE_ASSIGN = re.compile(r"(?<![=!<>+\-*/%&|^])=(?!=)")
+MAX_INIT_LINES = 40          # NASA-2: bound the continuation walk
+
+
+def _paren_end(masked: list[str], start: int) -> int:
+    """Index of the line where the brackets opened on `start` close again, or
+    `start` when they already balance. Bounded by MAX_INIT_LINES (NASA-2)."""
+    line = masked[start]
+    depth = line.count("(") + line.count("[") + line.count("{")
+    depth -= line.count(")") + line.count("]") + line.count("}")
+    j = start
+    steps = 0
+    while depth > 0 and j + 1 < len(masked) and steps < MAX_INIT_LINES:
+        j += 1
+        steps += 1
+        nxt = masked[j]
+        depth += nxt.count("(") + nxt.count("[") + nxt.count("{")
+        depth -= nxt.count(")") + nxt.count("]") + nxt.count("}")
+    return j
+
+
+def _init_expr(masked: list[str], start: int) -> tuple[str, int]:
+    """Return (initializer text, last line index) for the declaration at `start`,
+    following bracket continuations. Bounded by MAX_INIT_LINES."""
+    line = masked[start]
+    # The assignment '=', not the one inside '==', '>=', '+=' and friends.
+    eq = _RE_ASSIGN.search(line)
+    text = line[eq.end():] if eq is not None else ""
+    depth = text.count("(") + text.count("[") + text.count("{")
+    depth -= text.count(")") + text.count("]") + text.count("}")
+    j = start
+    steps = 0
+    while depth > 0 and j + 1 < len(masked) and steps < MAX_INIT_LINES:
+        j += 1
+        steps += 1
+        nxt = masked[j]
+        text += " " + nxt
+        depth += nxt.count("(") + nxt.count("[") + nxt.count("{")
+        depth -= nxt.count(")") + nxt.count("]") + nxt.count("}")
+    return text, j
+
+
+def find_forward_member_init(masked: list[str]) -> list[tuple[int, str]]:
+    """Flag member initializers reading a member declared later in the same class
+    body (H15). Two passes: collect each scope's declarations in order, then read
+    every initializer against the ones that come after it."""
+    n = min(len(masked), MAX_LINES)
+    # Pass 1 — walk the file once, tagging each member declaration with the class
+    # scope it belongs to. Scope key is the line the scope's `class` header sits
+    # on, 0 for the file's own body.
+    scope_stack: list[tuple[int, int]] = [(-1, 0)]      # (header indent, key)
+    func_stack: list[int] = []                          # indents of open funcs
+    decls: dict[int, dict[str, int]] = {0: {}}          # key -> name -> line
+    members: list[tuple[int, int, str]] = []            # (line, key, name)
+    skip_until = -1                                     # inside a continuation
+    for idx in range(n):
+        line = masked[idx]
+        if idx <= skip_until or line.strip() == "":
+            continue
+        ind = _indent(line)
+        while len(scope_stack) > 1 and ind <= scope_stack[-1][0]:
+            scope_stack.pop()
+        while func_stack and ind <= func_stack[-1]:
+            func_stack.pop()
+        hdr = _RE_CLASS_HDR.match(line)
+        if hdr is not None:
+            scope_stack.append((len(hdr.group(1)), idx))
+            decls.setdefault(idx, {})
+            continue
+        fn = _RE_FUNC_HDR.match(line)
+        if fn is not None:
+            # A SIGNATURE MAY SPAN LINES, and its closing ') -> T:' sits back at
+            # the header's own indent — walked naively that dedent closes the
+            # func, and every local in the body then reads as a member. Skip to
+            # the end of the signature instead. (Measured: without this, 43
+            # findings on one real tree, all of them locals.)
+            func_stack.append(len(fn.group(1)))
+            skip_until = _paren_end(masked, idx)
+            continue
+        if func_stack:
+            continue                                    # a local, not a member
+        mo = _RE_MEMBER_VAR.match(line)
+        if mo is None:
+            continue
+        key = scope_stack[-1][1]
+        name = mo.group(3)
+        decls[key][name] = idx
+        if mo.group(4) is not None:                     # has an initializer
+            members.append((idx, key, name))
+        # A multi-line initializer's closing bracket sits at the declaration's
+        # own indent too — same hazard, same answer.
+        skip_until = _paren_end(masked, idx)
+    # Pass 2 — every initializer against the names declared BELOW it in its scope.
+    out: list[tuple[int, str]] = []
+    for idx, key, name in members:
+        if _RE_ONREADY.match(masked[idx]):
+            continue                                    # runs in _ready, not here
+        text, _end = _init_expr(masked, idx)
+        if _RE_LAMBDA.search(text):
+            continue                                    # the body runs later
+        seen: set[str] = set()
+        for ref in _RE_IDENT.findall(text):
+            if ref in seen or ref == name:
+                continue
+            at = decls[key].get(ref)
+            if at is None or at <= idx:
+                continue
+            seen.add(ref)
+            out.append((idx, "H15: '%s' reads '%s', which is declared %d line(s) below it — member initializers run in DECLARATION ORDER, so this reads %s's type zero (0/0.0/null/empty), silently. Declare '%s' first, derive both from a const (consts are folded, order-free), or assign in _ready/_init" % (name, ref, at - idx, ref, ref)))
+    return out
+
+
 # ---- suppression -------------------------------------------------------------
 
 _RE_IGNORE = re.compile(r"#\s*gdlint:\s*ignore(?:\[([A-Za-z0-9, ]+)\])?")
@@ -865,6 +1000,10 @@ def lint_file(path: str) -> list[tuple[str, str]]:
     for line_idx, msg in find_print_in_perframe(masked):
         if not suppressed(raw_lines[line_idx], "S11"):
             findings.append((line_idx + 1, "S11", msg))
+
+    for line_idx, msg in find_forward_member_init(masked):
+        if not suppressed(raw_lines[line_idx], "H15"):
+            findings.append((line_idx + 1, "H15", msg))
 
     findings.sort(key=lambda f: (f[0], f[1]))
     # Format: 'path:line: RULE [CATEGORY]: body [advisory]'. Messages embed a
