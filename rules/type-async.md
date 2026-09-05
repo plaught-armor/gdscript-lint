@@ -12,6 +12,31 @@ paths:
 
 **Typed `for` loops** (H2) — `for item: Type in collection`. Untyped iter defeats optimization.
 
+**Member initializers run in DECLARATION ORDER; a forward reference reads the type zero** (H15) — a
+`var`/`static var` initializer that reads a member declared **below** it gets that field's zero value
+(`0`, `0.0`, `null`, empty `Array`), not its eventual value. **Silent** — no warning, no error, and
+the field ends up holding a plausible wrong number. Measured 4.8.dev
+(`tests/repro_member_init_order.gd`): `var a: int = b + 1` above `var b: int = 42` yields `a == 1`;
+below it, `a == 43`. Same for `static var`. Same inside an inner class. `_init`'s body runs after
+every initializer, so it sees real values.
+
+```gdscript
+# Bad — reads 0, ships 1, nothing complains.
+var _end_frame: int = _out_frame + 60
+var _out_frame: int = int(SECONDS * 60.0)
+
+# Good — declare the source first, or derive both from the const.
+var _out_frame: int = int(SECONDS * 60.0)
+var _end_frame: int = _out_frame + 60
+```
+
+`const` is the exception and the fix: consts are **constant-folded**, so a `const` may reference one
+declared below it and still read the real value, and a `var` initializer reading a `const` is always
+safe regardless of order. Bites hardest where one member is *derived* from another — a test
+harness's frame schedule off a duration dial, a cached bound off a size — which is exactly where the
+symptom is a wrong measurement rather than a crash. Assign in `_ready`/`_init` if declaration order
+can't be arranged.
+
 **Lambda captures by-value for locals, by-ref for members** ([#69014](https://github.com/godotengine/godot/issues/69014), H6) — share state via member vars or mutable containers.
 
 **Concurrent coroutine race conditions** (M3) — non-deterministic resume. Use flag+poll.
