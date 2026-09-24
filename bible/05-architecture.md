@@ -99,6 +99,30 @@ autoload exists in the SceneTree and can hold signals; a static-only RefCounted
 is purely a namespace for functions and constants. Reach for the autoload when
 you actually need what an autoload provides.
 
+**Why `RefCounted` and not a bare `Object` for the static-only case?** The
+question is natural — `Object` is the lighter base, so a namespace that never
+holds an instance looks like it should take the cheaper one. Measured on 4.8.dev
+(`tests/bench_objbase_proj/`, `tests/bench_object_vs_refcounted.gd`), it buys
+nothing. Calling a `static func` on a `class_name`'d helper costs 47.0 ns with an
+`Object` base against 46.4 ns with `RefCounted` — 0.6 ns apart, a wash. `Object`
+*is* genuinely cheaper, but every one of its savings is charged per instance:
+~22 ns per alloc+free, ~6 ns when the reference is passed as a function argument,
+and — the surprise — **zero bytes** resident, because the refcount is 8 bytes
+against a ~425-byte base that already carries an ObjectID, a script instance
+pointer, a signal map and a metadata table. Stores into an `Array` slot, a
+`Dictionary` or a member field show no difference at all. A static-only helper
+allocates zero instances, so the whole list multiplies by zero.
+
+What the bare `Object` does cost is real and it is a lifetime bug, not a
+slowdown. It never auto-frees, so the first `.new()` anyone adds later — a
+refactor that grows state, a misread of the API — leaks silently with nothing in
+the log; and a freed `Object` leaves references dangling, which drags
+`is_instance_valid()` (Part I, H8) onto every use site. Take that trade only
+where an explicit non-`Node` lifetime is the actual design, never as a weight
+optimization, and enforce "never instantiated" with the `static`-only discipline
+rather than with the base class. See D9 in [`dod.md`](../rules/dod.md) for
+the full table.
+
 | Class | extends | Autoloaded? | Owns |
 |---|---|---|---|
 | `WorldConstants` | `RefCounted` (static-only) | No — `class_name` global | Collision layer/mask bits, global enums w/ no clear system owner. Cross-system protocol, no state. |
