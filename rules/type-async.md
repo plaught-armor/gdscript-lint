@@ -8,7 +8,7 @@ paths:
 
 # GDScript — Type System & Async
 
-**No `:=`** (H1) — always `var x: Type = value`. `:=` also typed (perf wash, §03 measured) → ban = consistency/readability, not speed. Static typing vs untyped `var x =` ~25-47% faster (workload-dep; ~1.35× typical 4.8.dev).
+**No `:=`** (H1) — always `var x: Type = value`. `:=` also typed (perf wash, §03 measured) → ban = consistency/readability, not speed. Static typing vs untyped `var x =` ~25-47% faster (workload-dep; ~1.35× typical 4.8.dev) — **builtin types only**; for a `class_name`'d script class the win is +14-24% on access to an already-typed reference, **0% on a member write**, and **negative** wherever a script-type check happens (typed param -8%, `x as T` -34% = ~14 ns + ~6 ns per inheritance link, unconditional in release). `as` is also the only form that checks identically in debug and release — a typed assign's check is compiled out — so prefer it when the type comes from data you don't control, and always branch on its `null`. Prefer `var x: T = value` over `x as T` when the type is guaranteed; see bible §3f and `tests/bench_scriptclass_typing_proj/`.
 
 **Typed `for` loops** (H2) — `for item: Type in collection`. Untyped iter defeats optimization.
 

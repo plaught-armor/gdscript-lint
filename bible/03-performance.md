@@ -369,6 +369,150 @@ when the data backs it. C3/C9/C14 are blocking because they're **correctness**
 bugs; **H1** is blocking for *consistency* (the perf is a wash); the
 perf-motivated rules that didn't measure up (L1/L2/L3/P22) are **advisory**.
 
+### Script classes: typing pays on access, and costs you at the boundary
+
+Everything above measured **builtin** types — `bench_static_typing.gd` types `int`
+and `float` locals and nothing else. "Static typing is ~25–47% faster" is therefore
+an int-arithmetic number, and it does not transfer to a `class_name`'d GDScript
+type. That is a separate question with a different answer, and
+`bench_scriptclass_typing_proj/` asks it across the shapes a record is actually
+used in.
+
+**In plain terms:** an untyped value is a box with a label on the outside saying
+what is inside. Every time you use it, the engine reads the label first. Telling the
+compiler the type means it can skip reading the label — that is where the speedup
+comes from, and it is why *reading a field* or *calling a method* on a
+properly-typed reference is faster.
+
+But there is a second thing going on, and it runs the other way. Putting a value
+*into* a typed slot means proving it belongs there. For an `int` that proof is
+trivial. For one of your own classes the engine has to walk up the family tree:
+"is this thing a `HitRecord`? No — is its parent a `HitRecord`? No — is *its*
+parent…" and each step up costs about 6 ns. That walk is the fee, and it is charged
+at the moment the value crosses from a box into a typed slot — not while you use it
+afterwards.
+
+So the two halves are: **typing what you already hold is free speed; converting
+something you were handed costs a fee.** That is the whole finding, and it explains
+every row in the table — the positive rows all use an already-typed reference, and
+the negative rows all cross a boundary.
+
+One more wrinkle, and it is the practically important one. There are two different
+ways to cross, and they behave differently in a shipped game. `var x: T = value`
+does its proof **only while you are developing**; when you export the game that
+check is compiled out and disappears completely. `x as T` does the walk **always**,
+in the editor and in the shipped game alike, because it has to — it promises to hand
+you back `null` when the value is the wrong type, and it cannot know that without
+looking. You are paying for the `null`. That is a good deal when you check the
+`null`, and pure waste when you don't.
+
+Measured on 4.8.dev `30caae98b` (editor build, N = 2M, best-of-7, **median of 15
+runs, 1 discarded as contaminated**, n = 14):
+
+| Shape | Typed vs untyped | Range | Reading |
+|---|---|---|---|
+| member read (`rec.v`) | **+24%** | +22 to +28% | typing a held reference pays |
+| method call (`rec.bump(i)`) | **+14%** | +13 to +16% | pays |
+| member write (`rec.v = i`) | **−0.2%** | flat | a wash, not a win |
+| typed param pass | **−8%** | −14 to −5% | typed is *slower* |
+| same, body never dereferences | **−9%** | −10 to −4% | so the cost is the call-site check, not the body |
+| Variant → typed local | **−8%** | −11 to −3% | typed is *slower* |
+| `x as TypedRec` | **−34%** | −35 to −32% | 27.3 → 41.5 ns |
+| local assign from a typed source | **mid-to-high teens** | +15 to +26% | pays; magnitude not converged |
+| `int` arithmetic (positive control) | **high 20s to high 40s** | +24 to +47% | the builtin win, reproduced — the harness's most volatile row |
+
+**How those numbers were scrubbed, because it changed two of them.** A contended
+machine inflates every row of a run together, so contamination has to be discarded
+**per run, wholesale** — not per row by eyeballing each row's own min and max. The
+filter: take the median of all of a run's untyped baselines plus the depth-probe
+baseline, and drop the entire run if that exceeds the session median by >10%. One
+run in 15 failed it. Scrubbing that way collapsed `Variant → typed local` from an
+apparent "−6%, range −16 to +31%" to a clean **−8%, range −11 to −3%, entirely
+negative** — the positive tail was one bad run leaking in, not real spread. That row
+carries half the `ASSIGN_TYPED_SCRIPT` story, so the difference matters.
+
+A discard rule can of course flatter the thing it is filtering, so the filter was
+checked against that: recomputing every row with and without it moves each median by
+at most 0.8pp, **in both directions** (`member read` gets 0.8pp *worse*, `int
+builtin` 0.65pp better, every boundary-crossing row unchanged to within 0.05pp). So
+it is close to a no-op on the point estimates, and its real job is range hygiene —
+keeping one bad run from inventing a tail. The discarded count is reported alongside
+n so the reader can judge.
+
+**Do not trust `member write` alone as the contamination tell.** It is tempting
+because it should read flat, but at 16–17 ns absolute a 0.3–0.5 ns jitter is already
+multiple percent, so it produces false alarms on good runs — and it misses runs
+where only one or two rows are locally contaminated while it reads dead flat.
+Require at least two independent indicators to move together.
+
+**The last two rows are bands on purpose, and not because of within-session noise.**
+Their medians drift across whole *sessions* on the same machine: repeated batches
+put `int builtin` at +28%, +33%, +38%, +46% at different times of day. Positional
+split-halves inside one batch look converged and will not catch this, because both
+halves share that session's ambient state. Nothing in this section's argument rests
+on either row — `int builtin` exists only to prove the harness can see the builtin
+win at all (it has been positive in every run ever taken, minimum +18%), and the
+repo's quoted "~25–47% on builtins" comes from `bench_static_typing.gd`, a different
+benchmark. Every load-bearing row is in the converged set.
+
+So the line is not builtin-vs-script-class. It is **whether a script-type check
+happens**. Hold a reference that is already statically typed and typed access wins
+by 14–25%. Cross a Variant boundary into a typed slot and you pay for the crossing,
+which is why two rows go negative.
+
+**The two penalties do not have the same lifespan**, and this is the part worth
+remembering. Read the opcodes in `modules/gdscript/gdscript_vm.cpp`:
+
+- `OPCODE_ASSIGN_TYPED_SCRIPT` — the **entire** check body sits inside
+  `#ifdef DEBUG_ENABLED`. An exported release build does no check, so the −9% /
+  −8% assign-and-param penalty is an editor-build artifact.
+- `OPCODE_CAST_TO_SCRIPT` — the `#ifdef` covers only the freed-object and
+  non-object asserts. The `while (src_type)` walk up the script inheritance chain
+  is **outside** it. Unconditional, in every build.
+
+The walk is depth-dependent, which gives a way to confirm from inside a debug build
+that it really is the mechanism. Same instance (a `D4`), cast to targets at
+increasing distance up its own chain:
+
+| Cast target | ns/op (median of 14 clean runs) |
+|---|---|
+| no cast (baseline) | 27.3 |
+| `as D4` — 0 links | 41.5 |
+| `as D2` — 2 links | 53.1 |
+| `as DepthBase` — 4 links | 65.5 |
+
+Linear: **~14 ns fixed + ~6 ns per inheritance link** (5.98 ns/link across the four
+links). A deep class hierarchy makes every `as` against it worse, permanently.
+
+**Caveat, stated plainly:** the release half is read from source, **not measured**.
+No installed editor matches an installed export template (editors 4.8.dev / 4.6 /
+4.4.1 against templates 4.7.stable / 4.5.beta5), and a template refuses both
+`--path` and a CWD project (`disable_path_overrides`), so a release run needs a
+`template_release` built from this commit. Until that exists, treat "the assign and
+param penalties vanish in release" as a confident reading of the `#ifdef`, not a
+measurement. The `as` finding needs no such caveat — the walk is unconditional in
+the source and the depth probe measures it directly.
+
+**What to do with this:**
+
+- Type your records, fields and locals as usual. Holding a typed reference is a
+  14–25% win on access and costs nothing anywhere.
+- Prefer `var x: T = value` over `x as T` when the type is guaranteed: **~8 ns
+  cheaper** in a debug build (33.2 vs 41.3 ns), and free in release where `as` never
+  is.
+- Reach for `as` only when the value genuinely might not be a `T`, **or** when the
+  guarantee comes from data you don't control — a typed assign's check is gone in
+  release, so `as` is the only form that checks identically in both builds. You are
+  paying 14 ns + 6 ns/link **for the `null`** it hands back on a mismatch — worth it
+  exactly when you branch on that `null`, and wasted otherwise: an unchecked `as`
+  only defers the failure to the next access. Note the
+  asymmetry in failure behavior: `var x: T = wrong_thing` errors loudly in debug and
+  is *unchecked* in release, while `as` returns `null` identically in both.
+- Best of all, retype the source so no crossing happens — the precedence point
+  **H14c** already makes on readability grounds now has a number behind it.
+- Remember `is` does not narrow (**H14**): `if x is T:` then `x.field` still pays
+  Variant dispatch on the access. The guard buys safety, not speed.
+
 ---
 
 ## The folklore, overturned

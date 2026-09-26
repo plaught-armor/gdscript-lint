@@ -358,7 +358,7 @@ Most dispatch cost invisible vs frame budget. Matters only in measured hot loops
 
 | # | Move | Speedup | When |
 |---|---|---|---|
-| 1 | Static typing on every var/param/return | ~25-47% (workload-dep; ~1.35× typical, 4.8.dev) | always (mandatory) |
+| 1 | Static typing on every var/param/return | ~25-47% on **builtins** (workload-dep; ~1.35× typical, 4.8.dev). Script classes: +14-24% on access, 0% member write, **-8% typed param / -34% `as`** at a Variant boundary (bible §3f) | always (mandatory — the negative rows are boundary-crossing costs, not a reason to drop annotations) |
 | 2 | Typed math fns (`clampf`/`absf`/`lerpf`) | ~20-30% per call | always |
 | 3 | `@onready` / cached node refs (no `get_node` per call) | ~1.7× | always |
 | 4 | Hoist invariants out of hot loop | linear w/ iter count | measured hot loops |

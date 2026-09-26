@@ -36,6 +36,20 @@ own type tag, so every operation first asks "what's in here?" before doing the
 work. Typing removes that question; the compiler emits the `int`/`float`
 instruction directly.
 
+**That figure is builtin arithmetic, and your own classes behave differently.**
+Reading the label is only half the story. Putting a value *into* a slot typed as one
+of your own classes means proving it belongs there, and for a script class the engine
+proves it by walking up the class family tree one parent at a time. So typing a
+reference you already hold still pays (~+24% on a member read, ~+14% on a method
+call, a flat wash on a member write), while *crossing* into a typed slot charges a
+fee: a typed param runs ~8% slower than an untyped one, and `x as T` ~34% slower
+than leaving the value boxed — ~14 ns fixed plus ~6 ns per link in the chain. The
+fee for `var x: T =` is charged only while developing and vanishes when you export;
+the fee for `as` is charged always, because it promises you a `null` on a mismatch
+and cannot know without looking. Full measurement, the two opcodes behind the split,
+and the one caveat that is source-read rather than measured:
+[3f](03-performance.md#script-classes-typing-pays-on-access-and-costs-you-at-the-boundary).
+
 And speed is often the *smaller* win. When the compiler knows a variable's type, it
 knows what methods and properties that type has — so `x.do_thing()` is resolved and
 checked at parse time. You get autocomplete on `x`, and a misspelled method or a
