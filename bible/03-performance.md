@@ -424,9 +424,15 @@ runs, 1 discarded as contaminated**, n = 14):
 **How those numbers were scrubbed, because it changed two of them.** A contended
 machine inflates every row of a run together, so contamination has to be discarded
 **per run, wholesale** — not per row by eyeballing each row's own min and max. The
-filter: take the median of all of a run's untyped baselines plus the depth-probe
+filter: take the median of **both sides of every row** plus the depth-probe
 baseline, and drop the entire run if that exceeds the session median by >10%. One
-run in 15 failed it. Scrubbing that way collapsed `Variant → typed local` from an
+run in 15 failed it (score 36.1 against a 35.20 cutoff, while the 14 clean runs span
+30.4 to 32.8 — the line sits in a comfortable gap, not near the pack). Including the
+*typed* sides matters for a reason invisible in this batch: a basket built only from
+untyped baselines cannot see a run contaminated purely on the typed side, and those
+occur — one was observed scoring just under the cutoff while its typed sides spiked
+hard enough to flip a row's sign. On this batch both baskets discard the same run and
+give identical medians, so the change costs nothing and closes the hole. Scrubbing that way collapsed `Variant → typed local` from an
 apparent "−6%, range −16 to +31%" to a clean **−8%, range −11 to −3%, entirely
 negative** — the positive tail was one bad run leaking in, not real spread. That row
 carries half the `ASSIGN_TYPED_SCRIPT` story, so the difference matters.
@@ -438,6 +444,12 @@ builtin` 0.65pp better, every boundary-crossing row unchanged to within 0.05pp).
 it is close to a no-op on the point estimates, and its real job is range hygiene —
 keeping one bad run from inventing a tail. The discarded count is reported alongside
 n so the reader can judge.
+
+No whole-run filter catches everything, so trust the medians further than the ranges.
+`as` cast's range still holds a −44.0% outlier from a run whose overall health was
+normal — a spike local to that one row. Its median (−34%) and its halves (−32.9 /
+−34.5) are untouched by it, which is exactly why both get checked: a local spike
+moves a range, while only real drift moves a median and splits the halves.
 
 **Do not trust `member write` alone as the contamination tell.** It is tempting
 because it should read flat, but at 16–17 ns absolute a 0.3–0.5 ns jitter is already

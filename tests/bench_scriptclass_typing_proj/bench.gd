@@ -34,7 +34,11 @@ extends SceneTree
 ## row: that is how `cast from Variant` once looked like "-6%, range -16 to +31%"
 ## when it is really -8% and entirely negative. Filter used: median of all of a run's
 ## untyped baselines plus the depth baseline; drop the whole run if it exceeds the
-## session median by >10% (1 run in 15, typically).
+## session median by >10% (1 run in 15, typically). Put BOTH sides of every row in
+## that basket, not just the untyped ones: an untyped-only basket cannot see a run
+## contaminated purely on the typed side, and those occur. Also trust medians further
+## than ranges — a spike local to one row survives any whole-run filter, so check that
+## the median and the split-halves agree before quoting a figure.
 ## Do NOT use `member write` alone as the tell. It should read flat, but at 16-17 ns
 ## absolute a 0.3 ns jitter is already multiple percent, so it false-alarms on good
 ## runs and stays flat on runs where only one or two rows are locally contaminated.
