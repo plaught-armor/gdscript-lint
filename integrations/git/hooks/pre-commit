@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# git pre-commit hook — the deterministic GDScript gate on the commit path.
+#
+# Companion to integrations/claude-code/gd-check.sh (PostToolUse). That hook
+# only sees edits Claude Code makes through Edit/Write; this one sees every
+# commit, so it also covers code written in the Godot editor, by another agent,
+# or while the edit-time hook was broken or disabled.
+#
+# Three gates, cheapest first, same as gd-check.sh:
+#   1. gdscript-formatter --check   — official style-guide formatting
+#   2. gdscript-formatter lint      — its generic lint rules
+#   3. gd-lint.py                   — the bespoke rules/gdscript syntactic subset
+#
+# STAGED CONTENT, not the working tree. `git add -p` splits a file: what gets
+# committed is the index version, so every gate runs against blobs materialized
+# from the index. A dirty working tree cannot smuggle a violation past the gate,
+# and cannot fail a commit that does not contain it.
+#
+# DIFF-AWARE, same contract as gd-check.sh: for a file already tracked at HEAD,
+# findings are filtered to the lines this commit changes (index vs HEAD).
+# Pre-existing violations on untouched lines do not block — you own what you
+# touch. New / untracked files and the no-HEAD case are enforced in full. The
+# authoritative whole-tree run belongs in CI, not here: a gate that blocks a
+# one-line fix to a legacy file gets bypassed with --no-verify and then gates
+# nothing at all.
+#
+# FAILS CLOSED, unlike gd-check.sh. A missing tool aborts the commit instead of
+# passing silently — an absent linter is installable, and a gate nobody can tell
+# is dead is worse than no gate. The one exception is a *crashed* tool (the
+# known gdscript-formatter ternary panic): that gate is skipped for the file and
+# a WARNING is printed, so the hole is visible rather than silent.
+#
+# Exit: 0 clean (advisories may still print), 1 blocks the commit.
+
+set -u
+
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -n "$repo_root" ] || exit 0
+cd "$repo_root" || exit 1
+
+# --- staged GDScript (added/copied/modified/renamed; deletions have nothing to lint) ---
+staged=()
+while IFS= read -r -d '' p; do
+  case "$p" in *.gd) staged+=("$p") ;; esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+[ "${#staged[@]}" -eq 0 ] && exit 0
+
+# --- tools (fail closed) ---
+# GDLINT: explicit env, else the copy beside this hook in the gdscript-lint
+# checkout (hooks/ -> git/ -> integrations/ -> repo root), else the Claude Code
+# symlink convention.
+GDLINT="${GDLINT:-}"
+if [ -z "$GDLINT" ]; then
+  for cand in "$hook_dir/../../../gd-lint.py" "$HOME/.claude/hooks/gd-lint.py"; do
+    if [ -f "$cand" ]; then GDLINT="$cand"; break; fi
+  done
+fi
+FORMATTER="$(command -v gdscript-formatter || true)"
+
+missing=""
+[ -n "$GDLINT" ] && [ -f "$GDLINT" ] || missing="${missing}  - gd-lint.py not found (set GDLINT=/path/to/gd-lint.py)"$'\n'
+command -v python3 >/dev/null 2>&1 || missing="${missing}  - python3 not on PATH"$'\n'
+[ -n "$FORMATTER" ] || missing="${missing}  - gdscript-formatter not on PATH"$'\n'
+if [ -n "$missing" ]; then
+  {
+    echo "GDScript pre-commit gate cannot run — commit aborted:"
+    printf '%s' "$missing"
+    echo "Install the missing tool, or commit with --no-verify if you accept an ungated commit."
+  } >&2
+  exit 1
+fi
+
+stage_dir="$(mktemp -d)" || { echo "GDScript pre-commit gate: mktemp failed — commit aborted." >&2; exit 1; }
+trap 'rm -rf "$stage_dir"' EXIT
+
+# Project-local path excludes: one glob per line in .claude/gdlint-exclude at the
+# repo root, '#' comments allowed. For code the repo carries but does not author
+# — a vendored addon, generated output. Without it, dropping a fresh third-party
+# addon in stages a pile of NEW files, which are enforced in full, and a commit
+# of somebody else's code fails on rules that were never theirs. That is the
+# shape of a gate that gets --no-verify'd. No default list: addons/ holds
+# first-party code too, so the repo declares what it does not own.
+excludes=()
+if [ -f "$repo_root/.claude/gdlint-exclude" ]; then
+  while IFS= read -r pat; do
+    case "$pat" in ''|'#'*) continue ;; esac
+    excludes+=("$pat")
+  done < "$repo_root/.claude/gdlint-exclude"
+fi
+
+# excluded <rel> -> 0 when the path matches a declared exclude glob.
+excluded() {
+  [ "${#excludes[@]}" -eq 0 ] && return 1
+  local pat
+  for pat in "${excludes[@]}"; do
+    # shellcheck disable=SC2053 — glob match is the point
+    [[ "$1" == $pat ]] && return 0
+  done
+  return 1
+}
+
+# Project-local formatter rule disables (gdscript-formatter has no config file).
+# Same file gd-check.sh reads, so both gates agree on the project's conventions.
+proj_disable=""
+if [ -f "$repo_root/.claude/gdscript-formatter-disable" ]; then
+  proj_disable="$(grep -vE '^[[:space:]]*(#|$)' "$repo_root/.claude/gdscript-formatter-disable" | paste -sd, -)"
+fi
+
+have_head=0
+git rev-parse --verify -q HEAD >/dev/null 2>&1 && have_head=1
+
+errors=""
+advisories=""
+warnings=""
+checked=0
+skipped=0
+
+for rel in "${staged[@]}"; do
+  if excluded "$rel"; then
+    skipped=$((skipped + 1))
+    continue
+  fi
+  # --- materialize the INDEX version under its own relative path ---
+  # The path is reproduced (not flattened) because both gdscript-formatter and
+  # the tests/ exemption below key off it, and the finding text must cite a path
+  # the committer recognizes.
+  work="$stage_dir/work/$rel"
+  mkdir -p "$(dirname "$work")" || continue
+  git show ":$rel" > "$work" 2>/dev/null || continue
+  checked=$((checked + 1))
+
+  # --- diff-awareness: which lines does this commit change? ---
+  diff_aware=0
+  changed_lines=""
+  if [ "$have_head" = 1 ] && git cat-file -e "HEAD:$rel" 2>/dev/null; then
+    diff_aware=1
+    changed_lines="$(git diff --cached -U0 --no-color HEAD -- "$rel" 2>/dev/null | awk '
+      /^@@/ {
+        plus = $3            # +start,count
+        sub(/^\+/, "", plus)
+        n = split(plus, a, ",")
+        start = a[1] + 0
+        cnt = (n > 1 ? a[2] + 0 : 1)
+        for (i = 0; i < cnt; i++) print start + i
+      }')"
+  fi
+
+  # line_changed N -> 0 if line N is in the changed set (or diff_aware off).
+  line_changed() {
+    [ "$diff_aware" = 0 ] && return 0
+    printf '%s\n' "$changed_lines" | grep -qx -- "$1"
+  }
+
+  # filter_findings: stdin = tool findings ("<work path>:<line>:<rest>"). Keeps a
+  # finding only when its line is in the changed set, and rewrites the temp path
+  # back to the repo-relative one. Lines without a "<path>:<num>:" prefix are
+  # dropped so summaries cannot false-trigger the block.
+  filter_findings() {
+    while IFS= read -r ln; do
+      case "$ln" in
+        "$work":*)
+          rest="${ln#"$work":}"
+          num="${rest%%:*}"
+          case "$num" in
+            ''|*[!0-9]*) : ;;                     # not line-anchored — drop
+            *) line_changed "$num" && printf '%s:%s\n' "$rel" "$rest" ;;
+          esac
+          ;;
+        *) : ;;
+      esac
+    done
+  }
+
+  file_err=""
+
+  # --- gate 1: formatting ---
+  # Diff-aware: only flag when the staged file is unformatted AND the HEAD
+  # version was formatted, i.e. this commit introduced the drift.
+  fmt_stderr="$("$FORMATTER" --check "$work" 2>&1 >/dev/null)"
+  fmt_rc=$?
+  if printf '%s' "$fmt_stderr" | grep -qi 'panic'; then
+    warnings="${warnings}  $rel: gdscript-formatter panicked — FORMAT gate skipped for this file"$'\n'
+  elif [ "$fmt_rc" -ne 0 ]; then
+    head_unformatted=0
+    if [ "$diff_aware" = 1 ]; then
+      # gdscript-formatter rejects stdin, so the HEAD blob needs a real .gd path.
+      head_file="$stage_dir/head/$rel"
+      if mkdir -p "$(dirname "$head_file")" \
+        && git show "HEAD:$rel" > "$head_file" 2>/dev/null \
+        && [ -s "$head_file" ] \
+        && ! "$FORMATTER" --check "$head_file" >/dev/null 2>&1; then
+        head_unformatted=1   # already dirty at HEAD — this commit didn't cause it
+      fi
+    fi
+    if [ "$head_unformatted" = 0 ]; then
+      file_err="${file_err}  FORMAT: not formatted — run: gdscript-formatter \"$rel\""$'\n'
+    fi
+  fi
+
+  # --- gate 2: gdscript-formatter lint ---
+  # max-line-length: --check already enforces style-guide wrapping; what is left
+  # is usually an unwrappable string or res:// path. private-access: white-box
+  # tests legitimately reach internals, and the test runner is their real gate.
+  disable_rules="max-line-length"
+  case "$rel" in
+    tests/*|*/tests/*) disable_rules="${disable_rules},private-access" ;;
+  esac
+  [ -n "$proj_disable" ] && disable_rules="${disable_rules},${proj_disable}"
+  lint_raw="$("$FORMATTER" lint --disable "$disable_rules" "$work" 2>&1 || true)"
+  if printf '%s' "$lint_raw" | grep -qi 'panic'; then
+    warnings="${warnings}  $rel: gdscript-formatter panicked — LINT gate skipped for this file"$'\n'
+  else
+    lint_out="$(printf '%s\n' "$lint_raw" | filter_findings)"
+    [ -n "$lint_out" ] && file_err="${file_err}$(printf '%s\n' "$lint_out" | sed 's/^/  LINT: /')"$'\n'
+  fi
+
+  # --- gate 3: bespoke rule linter ---
+  # gd-lint tags advisory findings with ' [advisory]' and exits non-zero only on
+  # blocking ones. Blocking -> abort, advisory -> printed, never blocks.
+  rules_out="$(python3 "$GDLINT" "$work" 2>/dev/null || true)"
+  if [ -n "$rules_out" ]; then
+    blocking_rules="$(printf '%s\n' "$rules_out" | grep -v '\[advisory\]' | sed '/^$/d' | filter_findings || true)"
+    adv="$(printf '%s\n' "$rules_out" | grep '\[advisory\]' | filter_findings || true)"
+    [ -n "$blocking_rules" ] && file_err="${file_err}$(printf '%s\n' "$blocking_rules" | sed 's/^/  RULE: /')"$'\n'
+    [ -n "$adv" ] && advisories="${advisories}$(printf '%s\n' "$adv" | sed 's/^/  /')"$'\n'
+  fi
+
+  [ -n "$file_err" ] && errors="${errors}$rel:"$'\n'"${file_err}"
+done
+
+[ -n "$warnings" ] && printf 'GDScript pre-commit gate — DEGRADED:\n%s' "$warnings" >&2
+[ -n "$advisories" ] && printf 'GDScript advisories (not blocking):\n%s' "$advisories" >&2
+
+if [ -n "$errors" ]; then
+  {
+    printf 'GDScript pre-commit gate FAILED (%d file(s) checked). Fix and re-stage:\n' "$checked"
+    printf '%s' "$errors"
+  } >&2
+  exit 1
+fi
+
+if [ "$skipped" -gt 0 ]; then
+  printf 'GDScript pre-commit gate: OK (%d file(s), %d excluded).\n' "$checked" "$skipped" >&2
+else
+  printf 'GDScript pre-commit gate: OK (%d file(s)).\n' "$checked" >&2
+fi
+exit 0

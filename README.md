@@ -25,6 +25,7 @@ gap, with each rule tied to a Godot issue number where one exists.
 | `gd-lint.py` | The linter — pure Python stdlib (no pip, no tree-sitter), one file. Masks strings/comments, applies the rules, exits non-zero on a blocking finding. |
 | `rules/*.md` | The canonical knowledge — teaching prose + rationale for every rule, with Godot issue links. `index.md` is the map. Each file opens with a `paths:` frontmatter block (see below) — keep it. |
 | `tests/` | Per-rule fixtures + a runner that asserts each rule fires exactly where expected, validated against real GDScript the engine accepts. |
+| `integrations/git/` | The commit-path gate — a `pre-commit` hook running the same checks over staged `.gd`, plus an installer. Catches code no editor hook sees. |
 | `BENCH.md` | Measured perf data for every perf-motivated rule + the promotion criterion. |
 
 > This repo is the canonical home. The author's Claude Code setup consumes it by
@@ -111,6 +112,15 @@ var y := 6            # gdlint: ignore          — all rules on this line
 
 ### Pre-commit / CI
 
+The packaged hook (recommended — staged-content aware, diff-filtered, fails
+closed; see [`integrations/git/`](integrations/git/README.md)):
+
+```bash
+integrations/git/install.sh /path/to/your/godot/repo
+```
+
+Or via the `pre-commit` framework:
+
 ```yaml
 # .pre-commit-config.yaml
 - repo: local
@@ -150,6 +160,7 @@ measured ≥1.3× win with a near-zero false-positive rate.
 
 ```bash
 bash tests/run.sh                 # parse-validate fixtures with Godot + assert findings
+bash tests/test_pre_commit.sh     # behavior suite for the git pre-commit hook
 SKIP_GODOT=1 bash tests/run.sh    # skip the Godot pass (faster)
 GODOT_BIN=/path/to/godot bash tests/run.sh
 ```
