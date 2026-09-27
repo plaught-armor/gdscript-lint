@@ -505,6 +505,61 @@ methods unlimited.** Budget: at ~1k allocs/frame, ~16 inline fields ≈ 5% of a
 Not a lint rule — needs the field's static type *and* the call-site alloc rate,
 neither visible to gd-lint. Reviewer/design call, like D5.
 
+## Typed-container assign / `is` on worker threads — P23 (bench_typed_container_threads.gd)
+
+Backs **P23**. Question: do typed-container opcodes scale across threads? Tracks
+[#123791](https://github.com/godotengine/godot/pull/123791) (open PR, unmerged
+2026-09-27), which claims `OPCODE_ASSIGN_TYPED_ARRAY` / `OPCODE_TYPE_TEST_ARRAY`
+(and the `DICTIONARY` twins) compare the element script through
+`Variant::evaluate(OP_EQUAL)` → `ObjectDB::get_instance`, a global lock.
+
+```sh
+godot --headless --script tests/bench_typed_container_threads.gd
+```
+
+Fixed 4M-op workload split across T threads (`Thread` + a two-`Semaphore`
+barrier: all workers check in, then release together). Number = **per-thread
+ns/op** (slowest slice ÷ slice size): flat across T = no contention; rising =
+threads serialize on shared state. Best-of-5, 3 runs (last with the barrier),
+4.8.dev `6210a2fd8` **editor** build (the `template_release` binary won't run
+`--script` without a `.pck`, so release is unmeasured here):
+
+| case | T=1 | T=2 | T=4 | T=8 |
+|---|---:|---:|---:|---:|
+| base (int add, control) | 8–11 | 9 | 9 | 11–13 |
+| `is Array[bool]` on `Array[int]` | 11 | 11 | 11–12 | 12 |
+| assign `Array[int]` | 19 | 33–37 | 69–73 | 137–244 |
+| `is Array[Resource]` on `Array[Node]` | 14 | 37–38 | 96–98 | 200–221 |
+| assign `Array[Node]` | 21–23 | 40–67 | 158–162 | 506–548 |
+| assign `Array[HelperA]` (script) | 25–29 | 110–119 | 326–335 | 622–721 |
+| `is Array[HelperB]` on `Array[HelperA]` | 28 | 117–134 | 320–330 | 662–731 |
+| assign `Dictionary[int, HelperA]` | 39–40 | 144–146 | 381–396 | 1205–1395 |
+| element read `h = arr[0]` (`Array[HelperA]`) | 21 | 21 | 22 | 23–25 |
+| element write `arr[0] = h` (`Array[HelperA]`) | 22 | 38–41 | 74–80 | 159–221 |
+| element write, untyped `Array` | 14 | 14 | 15 | 16 |
+
+Reading:
+
+- **Contention reproduces, and is worse than the PR's release numbers.** Every
+  case that touches an element class or script goes from ~20–40 ns alone to
+  **500–1200 ns per op at 8 threads** — 25–30× slower per op, i.e. adding
+  threads makes the loop *slower in wall time*, not faster. The control and the
+  builtin-vs-builtin `is` stay flat, so it's the opcode, not the harness.
+- **`Array[int]` assignment contends too** (19 → 137–244), though there's no
+  object compare: the PR attributes it to the element-type `StringName`
+  returned by value — a shared refcount atomic.
+- **Element reads are flat; typed element writes contend, but only in debug.**
+  The untyped write stays flat, so the cost is the typed-element validate:
+  `ContainerTypeValidate::_internal_validate_object` calls
+  `ObjectDB::get_instance` inside `#ifdef DEBUG_ENABLED` (source-read). Release
+  exports skip that lock. #123791 doesn't touch this path.
+- **Single thread it's noise.** 20–40 ns/op matters only in a hot loop; P23 is
+  about worker threads.
+
+Re-run on a build containing #123791 before quoting these as current. If the
+PR lands, per-thread cost should go flat and P23 retires to "historical, below
+min Godot".
+
 ## Promotion criterion
 
 Move a rule out of `ADVISORY` (in `hooks/gd-lint.py`) to blocking only when:

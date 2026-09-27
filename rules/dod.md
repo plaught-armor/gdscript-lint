@@ -352,6 +352,20 @@ Frame budget 60fps = 16,666,000 ns. A ~100 ns indirection needs ~1,600 hits/fram
 - ⊥ hand-roll `Array[Callable]` multicast to dodge signals — 4 method-ref calls = 268 ns vs signal 263.9 ns, i.e. **loses**. Only direct typed calls in a loop beat it (222 ns, ~16%), and cost you `connect`/`disconnect` lifecycle + H4 typed-param check. Fixed 47.2 ns amortizes across listeners.
 - Rule: emit-freq × listener-count > **50_000/sec** on hot path → profile first. (1% of frame = ~1,620 broadcasts/frame; 1% of runtime = ~97,000 emits/sec. Old 100/sec trigger fired at ~0.001% of runtime.)
 
+## P23 — Typed-container assign / `is` serializes worker threads
+
+**Live on 4.8.dev; fix pending in [#123791](https://github.com/godotengine/godot/pull/123791) (open, unmerged 2026-09-27).** Whole-container assignment (`arr = other` where both are `Array[T]` / `Dictionary[K, V]`) and `x is Array[T]` check the element type. When `T` is a class or script, that check goes through `ObjectDB::get_instance` under a global lock. So on worker threads (`WorkerThreadPool`, `Thread`) those opcodes serialize, and cost per op **rises** with thread count.
+
+**Measured** (`tests/bench_typed_container_threads.gd`, editor build, per-thread ns/op, T=1 → T=8): `Array[ScriptClass]` assign 25 → **~650**. `Dictionary[int, ScriptClass]` assign 39 → **~1200–1400**. `is Array[Resource]` 14 → **~210**. `Array[int]` assign contends too, 19 → 140–245. Element read `h = arr[0]` stays flat (21 → 23), and so does the control loop (~10).
+
+- In a hot loop on a worker thread, **don't reassign or `is`-test typed containers per iteration.** Bind the container once outside the loop, then work on it in place.
+- **Element writes contend in debug builds only.** `arr[0] = h` into `Array[ScriptClass]` goes 22 → ~160–220 at 8 threads in the editor. An untyped `Array` stays flat (14 → 16). The lock is in `ContainerTypeValidate::_internal_validate_object`, under `#ifdef DEBUG_ENABLED` (source-read), so release exports skip it. Expect threaded code to profile worse in the editor than it ships. Don't untype containers for that.
+- Main-thread code: ignore. 20–40 ns/op single-threaded is noise (D9 budget).
+- **Don't drop the type annotation to dodge it.** An untyped container loses H10b and every typed-access win. Hoist the op instead.
+- Retire when your min Godot contains #123791: re-run the bench and expect flat assign / `is` rows. The PR does not touch element-write validation.
+
+Not lintable (needs thread context). Reviewer's call on threaded code.
+
 ## Inline perf checklist (ROI-ordered)
 
 Most dispatch cost invisible vs frame budget. Matters only in measured hot loops (1M+ ops/frame). Measure first.
